@@ -51,6 +51,7 @@ from tinkerkit.conversation import (
     Markup,
     Message,
     NoInterview,
+    NoWaitingPlan,
     Progress,
     PromptDrawer,
     Question,
@@ -58,6 +59,8 @@ from tinkerkit.conversation import (
     Reporter,
     Shell,
     Talk,
+    WaitingName,
+    WaitingPlan,
     after_word,
     built_project,
     command_of,
@@ -2839,14 +2842,14 @@ def test_a_deletion_preview_is_what_tinker_printed_without_its_errors(tmp_path, 
 def test_a_task_runs_as_its_own_tinker_and_its_plan_waits(desk, home_store):
     desk, channel, script = desk
     say(desk, channel, "/task a calculator")
-    wait_until(lambda: desk.waiting_plan is not None)
+    wait_until(lambda: bool(desk.waiting_plan))
     assert calls_of(script) == ["help", "task a calculator --confirm"]
     assert (
-        desk.waiting_plan["run"] == "abc123"
-        and desk.waiting_plan["stage"] == "spec"
-        and desk.waiting_plan["new"]
+        desk.waiting_plan.run == "abc123"
+        and not isinstance(desk.waiting_plan, WaitingName)
+        and desk.waiting_plan.new
     )
-    assert desk.waiting_plan["plan"].startswith("📋 **Plan for calc** · run `abc123`")
+    assert desk.waiting_plan.plan.startswith("📋 **Plan for calc** · run `abc123`")
     assert desk.status().startswith("🙋 **Tinker** · calc: a calculator waits for you")
 
 
@@ -2885,15 +2888,15 @@ def test_a_job_shows_its_progress_only_in_the_chat_that_asked(desk):
 def test_confirm_asks_a_new_projects_folder_once_then_builds(desk):
     desk, channel, script = desk
     say(desk, channel, "/task a calculator")
-    wait_until(lambda: desk.waiting_plan is not None)
+    wait_until(lambda: bool(desk.waiting_plan))
     say(desk, channel, "/confirm")
-    assert desk.waiting_plan["stage"] == "name" and any(
+    assert isinstance(desk.waiting_plan, WaitingName) and any(
         "📁 **Its folder:** `calc`" in text for text in channel.texts()[-3:]
     )
     say(desk, channel, "/confirm")
     wait_until(lambda: "resume @abc123" in calls_of(script))
     wait_until(lambda: not desk.busy())
-    assert desk.waiting_plan is None
+    assert not desk.waiting_plan
 
 
 @pytest.mark.spec("CNV-10")
@@ -2901,7 +2904,7 @@ def test_the_plan_that_waits_and_its_build_show_only_in_the_chat_that_confirmed(
     desk, channel, script = desk
     channel.allowed = ["1", "2"]
     say(desk, channel, "/task a calculator")
-    wait_until(lambda: desk.waiting_plan is not None)
+    wait_until(lambda: bool(desk.waiting_plan))
     say(desk, channel, "/confirm")
     say(desk, channel, "/confirm")
     wait_until(lambda: "resume @abc123" in calls_of(script))
@@ -2914,7 +2917,7 @@ def test_the_plan_that_waits_and_its_build_show_only_in_the_chat_that_confirmed(
 def test_a_confirmed_plan_is_kept_without_its_next_step_lines(desk):
     desk, channel, script = desk
     say(desk, channel, "/task a calculator")
-    wait_until(lambda: desk.waiting_plan is not None)
+    wait_until(lambda: bool(desk.waiting_plan))
     say(desk, channel, "/confirm")
     say(desk, channel, "/rename sums")
     wait_until(lambda: "resume @abc123" in calls_of(script))
@@ -2923,26 +2926,119 @@ def test_a_confirmed_plan_is_kept_without_its_next_step_lines(desk):
     assert not [line for line in kept if line.startswith(("👉", "⏱"))]
 
 
-def a_features_plan(root):
-    return {
-        "run": "abc123",
-        "folder": root / "calc",
-        "title": "calc: history",
-        "plan": "📋 plan",
-        "so_far": "1 second (1 seconds)",
-        "stage": "spec",
-        "new": False,
-    }
+def a_waiting_plan(tmp_path, new=True):
+    return WaitingPlan("abc123", tmp_path / "calc", "calc: history", "📋 plan\n📁 `calc`", "1 second", new)
+
+
+@pytest.mark.spec("CNV-10")
+def test_a_waiting_plan_owns_its_run_and_its_folder_name(tmp_path):
+    plan = a_waiting_plan(tmp_path)
+    assert plan.owns("abc123") and plan.owns("calc") and not plan.owns("other")
+    assert not NoWaitingPlan().owns("abc123") and not NoWaitingPlan()
+
+
+@pytest.mark.spec("CNV-10")
+def test_only_a_new_projects_plain_confirm_asks_its_folder_name(tmp_path):
+    plan = a_waiting_plan(tmp_path)
+    assert plan.asks_name("confirm", "")
+    assert not plan.asks_name("confirm", "calc") and not plan.asks_name("amend", "")
+    assert not a_waiting_plan(tmp_path, new=False).asks_name("confirm", "")
+    assert not plan.named().asks_name("confirm", "") and not NoWaitingPlan().asks_name("confirm", "")
+
+
+@pytest.mark.spec("CNV-10")
+def test_a_named_plan_keeps_the_plans_fields(tmp_path):
+    plan = a_waiting_plan(tmp_path)
+    named = plan.named()
+    assert isinstance(named, WaitingName) and vars(named) == vars(plan)
+
+
+@pytest.mark.spec("CNV-10")
+def test_a_plan_is_shown_with_the_time_so_far(tmp_path):
+    plan = a_waiting_plan(tmp_path)
+    assert plan.shown() == Progress.waits(plan.plan, plan.so_far)
+    assert NoWaitingPlan().shown() == ""
+
+
+@pytest.mark.spec("CNV-10")
+def test_a_named_plan_also_asks_for_its_folder(tmp_path):
+    plan = a_waiting_plan(tmp_path)
+    assert plan.asked() == plan.shown()
+    assert plan.named().asked() == (
+        f"{plan.shown()}\n\n📁 **Its folder:** `calc`\n👉 `/confirm` to build it "
+        f"there · `/rename NAME` to name it otherwise (it builds then)"
+    )
+
+
+@pytest.mark.spec("CNV-10")
+def test_the_next_steps_follow_what_the_plan_asks(tmp_path):
+    plan = a_waiting_plan(tmp_path)
+    assert plan.next_steps() == "`/confirm` · `/amend WHAT`"
+    assert plan.named().next_steps() == "`/confirm` · `/rename NAME`"
+
+
+@pytest.mark.spec("CNV-10")
+def test_a_renamed_plan_moves_its_folder_title_and_plan(tmp_path):
+    plan = a_waiting_plan(tmp_path)
+    plan.renamed("sums")
+    assert plan.folder == tmp_path / "sums" and plan.title == "sums: history"
+    assert plan.plan == "📋 plan\n📁 `sums`"
+
+
+@pytest.mark.spec("CNV-10")
+def test_a_folder_name_runs_the_plans_run(tmp_path):
+    plan = a_waiting_plan(tmp_path)
+    assert plan.run_for("calc") == "abc123" and plan.run_for("other") == "other"
+    assert plan.run_for("") is None
+    assert NoWaitingPlan().run_for("calc") == "calc" and NoWaitingPlan().run_for("") is None
+
+
+@pytest.mark.spec("CNV-10")
+def test_a_plan_moves_on_when_its_folder_starts_a_task(tmp_path):
+    plan = a_waiting_plan(tmp_path)
+    assert plan.moves_on(tmp_path / "calc") and not plan.moves_on(tmp_path)
+    assert not NoWaitingPlan().moves_on(tmp_path)
+
+
+@pytest.mark.spec("CNV-10")
+def test_a_plan_resumes_its_run(tmp_path):
+    assert a_waiting_plan(tmp_path).resumed() == ["resume", "@abc123"]
+
+
+class RenameDesk:
+    def __init__(self):
+        self.calls = []
+
+    def renamed_in_place(self, audience, waiting, name):
+        self.calls.append(("in place", waiting, name))
+
+    def build_renamed(self, audience, waiting, name):
+        self.calls.append(("build", waiting, name))
+        return "building"
+
+
+@pytest.mark.spec("CNV-10")
+def test_a_renamed_spec_plan_stays_waiting(tmp_path):
+    plan, desk = a_waiting_plan(tmp_path), RenameDesk()
+    assert plan.after_rename(desk, [], "sums") is None
+    assert desk.calls == [("in place", plan, "sums")]
+
+
+@pytest.mark.spec("CNV-10")
+def test_a_renamed_named_plan_builds(tmp_path):
+    plan, desk = a_waiting_plan(tmp_path).named(), RenameDesk()
+    assert plan.after_rename(desk, [], "sums") == "building"
+    assert desk.calls == [("build", plan, "sums")]
 
 
 @pytest.mark.spec("CNV-10")
 def test_confirm_of_a_feature_builds_at_once_and_amend_changes_it(desk):
     desk, channel, script = desk
-    desk.waiting_plan = a_features_plan(desk.root)
+    desk.waiting_plan = a_waiting_plan(desk.root, new=False)
     say(desk, channel, "/amend also keep the date")
     wait_until(lambda: "amend @abc123 also keep the date" in calls_of(script))
     wait_until(lambda: not desk.busy())
-    desk.waiting_plan = a_features_plan(desk.root)
+    desk.waiting_plan = a_waiting_plan(desk.root, new=False)
     say(desk, channel, "/confirm @calc")
     wait_until(lambda: "resume @abc123" in calls_of(script))
 
@@ -2958,7 +3054,7 @@ def test_what_waits_for_confirm_is_cancelled_by_anything_else(desk, monkeypatch)
     say(desk, channel, "/confirm")
     wait_until(lambda: ["clear", "memory", "--yes"] in desk.ran)
     assert desk.decide([(channel, "1")], "confirm", ["confirm"]).startswith("🤷 No plan waits")
-    assert desk.rename([(channel, "1")], {}, ["rename", "x"]).startswith("🤷 No plan waits")
+    assert desk.rename([(channel, "1")], NoWaitingPlan(), ["rename", "x"]).startswith("🤷 No plan waits")
 
 
 @pytest.mark.spec("CNV-10")
@@ -3136,7 +3232,12 @@ def test_a_glance_goes_soon_and_history_shows_things_again(desk, monkeypatch):
 @pytest.mark.spec("CNV-13")
 def test_follow_reads_the_tasks_tracker(tmp_path, home_store):
     desk = Desk.__new__(Desk)
-    desk.echo_to_terminal, desk.messages_by_run, desk.seconds_by_run, desk.waiting_plan = False, {}, {}, None
+    desk.echo_to_terminal, desk.messages_by_run, desk.seconds_by_run, desk.waiting_plan = (
+        False,
+        {},
+        {},
+        NoWaitingPlan(),
+    )
     desk.say_status = lambda *args, **kwargs: None
     reporter = Reporter(everyone([Recorder()]), "a calculator", pid=4343)
     keep_job(home_store, 1, 4343, snapshot(folder="/tmp/projects/calc", waiting=PLAN))
@@ -3153,7 +3254,7 @@ def test_follow_reads_the_tasks_tracker(tmp_path, home_store):
     desk.follow(process, reporter, task)
     assert task["run"] == "abc123" and task["folder"] == Path("/tmp/projects/calc")
     assert task["title"] == "calc: a calculator" == reporter.progress.title
-    assert desk.waiting_plan["run"] == "abc123" and desk.messages_by_run["abc123"] is reporter.sent
+    assert desk.waiting_plan.run == "abc123" and desk.messages_by_run["abc123"] is reporter.sent
     assert reporter.tracked()["waiting"] == PLAN
 
 

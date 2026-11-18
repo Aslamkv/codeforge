@@ -5,6 +5,7 @@ import shutil
 import signal
 import sys
 from collections import namedtuple
+from dataclasses import dataclass
 from typing import NamedTuple
 lazy import datetime
 lazy import fcntl
@@ -323,6 +324,90 @@ def command_once(console, talk, message):
         console.show(chat, None, f"🚫 _Not run:_ `{proposed['line']}`", done=True)
 
 
+@dataclass
+class WaitingPlan:
+    run: str
+    folder: Path
+    title: str
+    plan: str
+    so_far: str
+    new: bool
+
+    def owns(self, target):
+        return target in (self.run, self.folder.name)
+
+    def asks_name(self, command, name):
+        return command == "confirm" and not name and self.new
+
+    def named(self):
+        return WaitingName(**vars(self))
+
+    def shown(self):
+        return Progress.waits(self.plan, self.so_far)
+
+    def asked(self):
+        return self.shown()
+
+    def next_steps(self):
+        return "`/confirm` · `/amend WHAT`"
+
+    def renamed(self, name):
+        old, self.folder = self.folder, self.folder.parent / name
+        self.title = f"{name}: {self.title.split(': ', 1)[-1]}"
+        self.plan = self.plan.replace(f"📁 `{old.name}`", f"📁 `{name}`")
+
+    def run_for(self, name):
+        return self.run if name and name == self.folder.name else name or None
+
+    def moves_on(self, folder):
+        return self.folder == folder
+
+    def resumed(self):
+        return ["resume", f"@{self.run}"]
+
+    def after_rename(self, desk, audience, name):
+        desk.renamed_in_place(audience, self, name)
+
+
+class WaitingName(WaitingPlan):
+    def asks_name(self, command, name):
+        return False
+
+    def asked(self):
+        return (
+            f"{self.shown()}\n\n📁 **Its folder:** `{self.folder.name}`\n👉 `/confirm` to build it "
+            f"there · `/rename NAME` to name it otherwise (it builds then)"
+        )
+
+    def next_steps(self):
+        return "`/confirm` · `/rename NAME`"
+
+    def after_rename(self, desk, audience, name):
+        return desk.build_renamed(audience, self, name)
+
+
+class NoWaitingPlan:
+    run = None
+
+    def __bool__(self):
+        return False
+
+    def owns(self, target):
+        return False
+
+    def asks_name(self, command, name):
+        return False
+
+    def shown(self):
+        return ""
+
+    def run_for(self, name):
+        return name or None
+
+    def moves_on(self, folder):
+        return False
+
+
 class Desk:
     COMMANDS = tuple(command.name for command in COMMANDS if command.chat)
     TRACKER_LOOK_SECONDS = 1.0
@@ -335,7 +420,7 @@ class Desk:
         self.lock, self.talk = threading.Lock(), Talk(commands_brief(), pausing_jobs=answering)
         self.questions = Questions()
         self.shell = Shell(self.talk, self.root, self.questions)
-        self.waiting_plan = None
+        self.waiting_plan = NoWaitingPlan()
         self.messages_by_run = {}
         self.seconds_by_run = {}
         self.consoles = [channel for channel in channels if isinstance(channel, ConsoleChannel)]
@@ -550,12 +635,8 @@ class Desk:
             behind = f" · {len(queued)} queued" if queued else ""
             return md(t"🔄 **Tinker** · working on {job['title']}{behind}")
         if self.waiting_plan:
-            then = (
-                "`/confirm` · `/rename NAME`"
-                if self.waiting_plan.get("stage") == "name"
-                else "`/confirm` · `/amend WHAT`"
-            )
-            return md(t"🙋 **Tinker** · {self.waiting_plan['title']} waits for you: {then:md}")
+            then = self.waiting_plan.next_steps()
+            return md(t"🙋 **Tinker** · {self.waiting_plan.title} waits for you: {then:md}")
         return "🟢 **Tinker** · idle: send a task"
 
     @staticmethod
@@ -1080,20 +1161,20 @@ class Desk:
         return self.start_task(audience, ["task", request], self.root, request)
 
     def decide(self, audience, command, words):
-        waiting = self.waiting_plan or {}
+        waiting = self.waiting_plan
         if command == "rename":
             return self.rename(audience, waiting, words)
         name, rest = refs(words[1:])
         if command == "amend" and not rest:
             return USAGE["amend"]
-        if self.confirms_a_new_project(command, name, waiting):
+        if waiting.asks_name(command, name):
             return self.ask_folder_name(audience, waiting)
-        target = name or waiting.get("run")
+        target = name or waiting.run
         if not target:
             return "🤷 No plan waits for confirmation: start one with `/task WHAT TO BUILD`"
-        mine = bool(waiting) and target in (waiting.get("run"), Path(str(waiting.get("folder", ""))).name)
-        folder, title = (waiting["folder"], waiting["title"]) if mine else (self.root, f"@{target}")
-        target = waiting["run"] if mine else target
+        mine = waiting.owns(target)
+        folder, title = (waiting.folder, waiting.title) if mine else (self.root, f"@{target}")
+        target = waiting.run if mine else target
         if command == "confirm":
             started = self.start_task(
                 audience,
@@ -1101,7 +1182,7 @@ class Desk:
                 folder,
                 title,
                 "✅ **Confirmed:** building it",
-                keep=waiting["plan"] if mine else "",
+                keep=waiting.plan if mine else "",
             )
         else:
             change = " ".join(rest)
@@ -1112,38 +1193,25 @@ class Desk:
                 title,
                 md(t"✏️ **Changing the plan:** {change}"),
             )
-        return self.on_task(audience, waiting if mine else {}, started)
-
-    @staticmethod
-    def confirms_a_new_project(command, name, waiting):
-        return command == "confirm" and not name and waiting.get("stage") == "spec" and waiting.get("new")
+        return self.on_task(audience, waiting if mine else NoWaitingPlan(), started)
 
     def ask_folder_name(self, audience, waiting):
-        waiting["stage"] = "name"
-        self.on_board(audience, waiting, self.asked(waiting))
+        self.waiting_plan = named = waiting.named()
+        self.on_board(audience, named, named.asked())
         return None
 
     def on_task(self, audience, waiting, said):
         if said and waiting:
-            self.on_board(audience, waiting, f"{self.asked(waiting)}\n\n{said}")
+            self.on_board(audience, waiting, f"{waiting.asked()}\n\n{said}")
             return None
         return said
 
     @staticmethod
-    def asked(waiting):
-        if waiting.get("stage") != "name":
-            return Desk.plan_shown(waiting)
-        return (
-            f"{Desk.plan_shown(waiting)}\n\n📁 **Its folder:** `{Path(waiting['folder']).name}`\n👉 `/confirm` to build it "
-            f"there · `/rename NAME` to name it otherwise (it builds then)"
-        )
-
-    @staticmethod
     def plan_shown(waiting):
-        return Progress.waits(waiting["plan"], waiting["so_far"]) if waiting else ""
+        return waiting.shown()
 
     def on_board(self, audience, waiting, text):
-        board = self.messages_by_run.setdefault(waiting["run"], {})
+        board = self.messages_by_run.setdefault(waiting.run, {})
         for channel, chat in audience:
             board[(channel.name, chat)] = channel.show(chat, board.get((channel.name, chat)), text, done=True)
         self.say_status()
@@ -1158,36 +1226,31 @@ class Desk:
         why = self.rename_folder(waiting, words[1])
         if why is not None:
             return self.on_task(audience, waiting, md(t"⚠️ **Not renamed:** {why}"))
-        self.renamed(waiting, words[1])
-        if waiting.get("stage") != "name":
-            self.on_board(
-                audience, waiting, f"{self.plan_shown(waiting)}\n\n📁 **Renamed:** its folder is `{words[1]}`"
-            )
-            return None
+        waiting.renamed(words[1])
+        return waiting.after_rename(self, audience, words[1])
+
+    def renamed_in_place(self, audience, waiting, name):
+        self.on_board(audience, waiting, f"{waiting.shown()}\n\n📁 **Renamed:** its folder is `{name}`")
+
+    def build_renamed(self, audience, waiting, name):
         return self.on_task(
             audience,
             waiting,
             self.start_task(
                 audience,
-                ["resume", f"@{waiting['run']}"],
-                waiting["folder"],
-                waiting["title"],
-                f"✅ **Renamed** to `{words[1]}`: building it",
-                keep=waiting["plan"],
+                waiting.resumed(),
+                waiting.folder,
+                waiting.title,
+                f"✅ **Renamed** to `{name}`: building it",
+                keep=waiting.plan,
             ),
         )
 
     def rename_folder(self, waiting, name):
-        done = self.run_tinker(["rename", f"@{waiting['run']}", name], 60)
+        done = self.run_tinker(["rename", f"@{waiting.run}", name], 60)
         if done.returncode:
             return first_lines((done.stdout + done.stderr).strip(), 10).splitlines()[-1]
         return None
-
-    @staticmethod
-    def renamed(waiting, name):
-        old, waiting["folder"] = waiting["folder"], Path(waiting["folder"]).parent / name
-        waiting["title"] = f"{name}: {waiting['title'].split(': ', 1)[-1]}"
-        waiting["plan"] = waiting["plan"].replace(f"📁 `{Path(old).name}`", f"📁 `{name}`")
 
     def resume(self, audience, words):
         name, rest = refs(words[1:])
@@ -1390,9 +1453,8 @@ class Desk:
             self.say_status()
             with self.reporter.lock:
                 self.reporter.update()
-        its_plan_moves_on = self.waiting_plan and self.waiting_plan["folder"] == folder
-        if its_plan_moves_on:
-            self.waiting_plan = None
+        if self.waiting_plan.moves_on(folder):
+            self.waiting_plan = NoWaitingPlan()
         threading.Thread(
             target=self.follow, args=(self.last_task, self.reporter, self.task), daemon=True
         ).start()
@@ -1400,10 +1462,7 @@ class Desk:
 
     def run_named(self, arguments):
         name = refs(arguments[1:2])[0] if arguments[0] in ("resume", "amend") else ""
-        waiting = self.waiting_plan or {}
-        return (
-            waiting.get("run") if name and name == Path(str(waiting.get("folder", ""))).name else name or None
-        )
+        return self.waiting_plan.run_for(name)
 
     def spawn(self, arguments):
         arguments = arguments + ["--confirm"] if arguments[0] in PLAN_CONFIRMING_COMMANDS else arguments
@@ -1444,15 +1503,14 @@ class Desk:
         reporter.finish(final)
         if task["run"] and reporter.progress.waiting():
             plan = reporter.progress.snapshot["waiting"]
-            self.waiting_plan = {
-                "run": task["run"],
-                "folder": task["folder"],
-                "title": task["title"],
-                "plan": reporter.progress.planned(plan),
-                "so_far": reporter.progress.time_taken(),
-                "stage": "spec",
-                "new": plan.get("kind") == "project",
-            }
+            self.waiting_plan = WaitingPlan(
+                task["run"],
+                Path(task["folder"]),
+                task["title"],
+                reporter.progress.planned(plan),
+                reporter.progress.time_taken(),
+                plan.get("kind") == "project",
+            )
         self.say_status()
 
     def stop_task(self):
