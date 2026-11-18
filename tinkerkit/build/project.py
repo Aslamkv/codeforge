@@ -1,6 +1,7 @@
 import re
 from collections import namedtuple
 from collections.abc import MutableMapping, MutableSequence
+lazy import datetime
 lazy import os
 lazy import secrets
 lazy import shutil
@@ -8,7 +9,8 @@ lazy import time
 lazy from pathlib import Path
 
 lazy from ..jobs import Jobs, began_at
-lazy from ..messages import say
+lazy from ..messages import human_duration, say
+lazy from ..model.models import Models
 lazy from ..prompts import Part, Prompts, Reply
 lazy from ..settings import (
     EXERCISE_ENV,
@@ -747,6 +749,39 @@ class Brief:
 
 def ending(status, headline, details=(), next=()):
     return {"status": status, "headline": headline, "details": list(details), "next": list(next)}
+
+
+class TrackedWork:
+    def __init__(self, started_at, voice):
+        self.started_at = started_at
+        self.voice = voice
+
+    def run(self, title, setup, work, blocked=None):
+        tracker = Tracker(title, started=self.started_at.timestamp())
+        self.voice.follow(tracker.heard)
+        ended = ending("stopped", f"{title} did not finish")
+        tools = ()
+        try:
+            tools = setup(tracker)
+            ended = work(tracker, *tools)
+        except SystemExit as stopped:
+            ended = blocked(stopped) if blocked else ending("blocked", first_line(str(stopped), 200))
+            raise
+        finally:
+            if tools:
+                Models.remember(tools[0])
+            took = time.time() - self.started_at.timestamp()
+            self.voice.title(f"Time taken: {human_duration(took)}", "⏱️")
+            tracker.end(ended, took)
+
+
+class Subsystem:
+    def __init__(self, yes=False, started_at=None):
+        self.yes = yes
+        self.started_at = started_at or datetime.datetime.now()
+
+    def tracked(self, voice, title, setup, work):
+        TrackedWork(self.started_at, voice).run(title, setup, work)
 
 
 class Tracker:

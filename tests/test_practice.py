@@ -8,11 +8,12 @@ from conftest import add_back, criterion
 from test_conversation import Recorder, everyone
 
 from tinkerkit import conversation, practice
-from tinkerkit.build.project import Steps, Tracker, project_store
+from tinkerkit.build.project import Steps, TrackedWork, Tracker, project_store
 from tinkerkit.cli import Cli
 from tinkerkit.conversation import Desk, Message
 from tinkerkit.jobs import Jobs, Queue
 from tinkerkit.knowledge.library import Knowledge, Library
+from tinkerkit.model.thinking import Thinking
 from tinkerkit.practice import (
     PRACTICE_STEPS,
     Exercise,
@@ -24,7 +25,7 @@ from tinkerkit.practice import (
     read_choice,
     read_verdict,
 )
-from tinkerkit.settings import Config
+from tinkerkit.settings import WORK_THINK, Config
 
 OTHER_LIVE_PID = os.getppid()
 BUILDING = {"title": "Exercising Rust", "exercise": True, "doing": "🔨 Building"}
@@ -561,3 +562,58 @@ def wait_for_the_reporter_to_end(desk):
 def test_exercise_commands_that_switch_it_show_in_its_message_alone():
     assert all(map(conversation.exercise_switch, ["/exercise rust", "/exercise python 3"]))
     assert not any(map(conversation.exercise_switch, ["/exercise status", "/exercise", "exercise rust"]))
+
+
+class Heard:
+    def follow(self, follower):
+        pass
+
+
+class PhaseTracker:
+    def phase(self, step):
+        return f"phase {step}"
+
+
+TRACKER = PhaseTracker()
+
+
+@pytest.mark.spec("TNK-1", "EXR")
+def test_practice_handles_exercise_status_with_the_measured_projects(monkeypatch):
+    seen = []
+    monkeypatch.setattr(practice, "show", lambda: seen.append("show"))
+    assert practice.Practice.COMMANDS == ("exercise",)
+    practice.Practice().handle(["exercise", "Status"], Heard())
+    assert seen == ["show"]
+
+
+@pytest.mark.spec("TNK-1", "EXR", "CNV")
+def test_an_exercise_job_attaches_its_tracker_to_the_chat_after_its_setup(monkeypatch):
+    seen = []
+
+    def run(work, title, setup, ended, blocked=None):
+        seen.append(("follow", title))
+        seen.append(("ended", ended(TRACKER, *setup(TRACKER))))
+
+    monkeypatch.setattr(TrackedWork, "run", run)
+    monkeypatch.setattr(
+        Thinking,
+        "for_work",
+        staticmethod(lambda request, phase, think: seen.append(("model", think)) or "model"),
+    )
+    monkeypatch.setattr(conversation, "attach", lambda tracker: seen.append(("attach", tracker)))
+    monkeypatch.setattr(
+        practice.Exercise,
+        "run",
+        lambda exercise, what: seen.append(("run", exercise.model, what)) or "exercised",
+    )
+    monkeypatch.setattr(
+        practice.Exercise, "__init__", lambda exercise, model, tracker: setattr(exercise, "model", model)
+    )
+    practice.Practice().handle(["exercise", "rust"], Heard())
+    assert seen == [
+        ("follow", "Exercising rust"),
+        ("model", WORK_THINK),
+        ("attach", TRACKER),
+        ("run", "model", "rust"),
+        ("ended", "exercised"),
+    ]

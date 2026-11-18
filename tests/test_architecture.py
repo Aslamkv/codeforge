@@ -55,6 +55,7 @@ LAYERS = (
     "build.code",
     "build.finish",
     "build.cycle",
+    "tinker",
     "cli",
 )
 

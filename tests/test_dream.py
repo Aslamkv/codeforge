@@ -9,8 +9,11 @@ import urllib.request
 import pytest
 from conftest import ask, confirmed_trait, quick_model_replying, replying
 
+from tinkerkit.build.project import TrackedWork
 from tinkerkit.jobs import Jobs, Queue
-from tinkerkit.memory.dream import Dream, LiveGraph, MemoryGraph, asked, show_dream, show_memory_graph
+from tinkerkit.memory import dream as dream_module
+from tinkerkit.memory import memories as memory_views
+from tinkerkit.memory.dream import Dream, LiveGraph, MemoryGraph, Mind, asked, show_dream, show_memory_graph
 from tinkerkit.memory.memories import Memories, Questions, Scratchpad, Traits
 from tinkerkit.model.models import Models, OllamaError
 from tinkerkit.prompts import Prompts
@@ -1149,3 +1152,84 @@ def test_live_graph_writes_a_keepalive_so_a_closed_browser_ends_its_stream(live_
     monkeypatch.setattr("tinkerkit.memory.dream.time.sleep", polled_without_writing)
     with pytest.raises(BrokenPipeError):
         live_graph.stream(ClosedBrowser(), live_graph.newest_event())
+
+
+class Heard:
+    def follow(self, follower):
+        pass
+
+
+class PhaseTracker:
+    def phase(self, step):
+        return f"phase {step}"
+
+
+def tracked_work(monkeypatch):
+    seen = []
+
+    def run(work, title, setup, ended, blocked=None):
+        seen.append(("follow", title))
+        seen.append(("ended", ended(PhaseTracker(), *setup(PhaseTracker()))))
+
+    monkeypatch.setattr(TrackedWork, "run", run)
+    return seen
+
+
+@pytest.mark.spec("TNK-1", "REM-7", "REM-8", "REM-9", "REM-10", "SET-8")
+def test_mind_handles_the_memory_views_and_gives_forget_the_persons_yes(home_store, monkeypatch):
+    seen = []
+    for view in ("show_memories", "show_remembered", "forget", "show_traits"):
+        monkeypatch.setattr(memory_views, view, lambda *given, view=view: seen.append((view, *given)))
+    monkeypatch.setattr(dream_module, "show_memory_graph", lambda: seen.append(("show_memory_graph",)))
+    assert Mind.COMMANDS == ("memory", "dream")
+    for yes, words in (
+        (False, []),
+        (False, ["2"]),
+        (False, ["show", "a1b2c3"]),
+        (True, ["forget", "a1b2c3"]),
+        (False, ["forget", "d4e5f6"]),
+        (False, ["traits"]),
+        (False, ["graph"]),
+    ):
+        Mind(yes).handle(["memory", *words], Heard())
+    assert seen == [
+        ("show_memories", 1),
+        ("show_memories", 2),
+        ("show_remembered", "a1b2c3"),
+        ("forget", "a1b2c3", True),
+        ("forget", "d4e5f6", False),
+        ("show_traits",),
+        ("show_memory_graph",),
+    ]
+
+
+@pytest.mark.spec("TNK-1", "DRM-8", "DRM-9")
+def test_mind_shows_the_dream_and_dream_run_is_a_job_with_the_tracker_phases(home_store, monkeypatch):
+    seen = tracked_work(monkeypatch)
+    monkeypatch.setattr(dream_module, "show_dream", lambda: seen.append("show_dream"))
+    monkeypatch.setattr(dream_module.sys.stdout, "isatty", lambda: False)
+    monkeypatch.setattr(dream_module, "show_memory_graph", lambda: seen.append("show_memory_graph"))
+    monkeypatch.setattr(Retriever, "__init__", lambda retriever, embeddings: None)
+    monkeypatch.setattr("tinkerkit.ranking.Embeddings.configured", staticmethod(lambda: None))
+    monkeypatch.setattr(
+        Dream, "run", lambda dream: seen.append(("run", dream.phase("consolidate"))) or "dreamt"
+    )
+    for words in ([], ["status"], ["graph"], ["run"]):
+        Mind().handle(["dream", *words], Heard())
+    assert seen == [
+        "show_dream",
+        "show_dream",
+        "show_memory_graph",
+        ("follow", "Dreaming"),
+        ("run", "phase consolidate"),
+        ("ended", "dreamt"),
+    ]
+
+
+@pytest.mark.spec("DRM-9")
+def test_mind_serves_the_live_dream_graph_in_a_terminal(home_store, monkeypatch):
+    seen = []
+    monkeypatch.setattr(dream_module.sys.stdout, "isatty", lambda: True)
+    monkeypatch.setattr(dream_module, "serve_dream_graph", lambda: seen.append("serve_dream_graph"))
+    Mind().handle(["dream", "graph"], Heard())
+    assert seen == ["serve_dream_graph"]

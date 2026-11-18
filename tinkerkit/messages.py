@@ -333,6 +333,28 @@ class Messages:
         self.__init__()
 
 
+class Voice:
+    def agreed(self, question):
+        raise NotImplementedError
+
+    def follow(self, follower):
+        raise NotImplementedError
+
+    def title(self, text, icon=""):
+        raise NotImplementedError
+
+
+class TerminalVoice(Voice):
+    def agreed(self, question):
+        return say.agreed(question)
+
+    def follow(self, follower):
+        say.follow(follower)
+
+    def title(self, text, icon=""):
+        say.title(text, icon)
+
+
 def terminal_write(text):
     sys.__stdout__.write(text)
     sys.__stdout__.flush()

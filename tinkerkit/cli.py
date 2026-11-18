@@ -8,12 +8,11 @@ lazy import os
 lazy import secrets
 lazy import shutil
 lazy import signal
-lazy import time
 lazy import traceback
 lazy import webbrowser
 lazy from pathlib import Path
 
-from . import conversation, logger, practice, shelf, skills
+from . import conversation, logger, shelf
 from .commands import BY_NAME, COMMANDS, GROUPS, kind_of, refs, taught_command
 from .jobs import (
     STATES,
@@ -25,12 +24,11 @@ from .jobs import (
     queue_action,
     queue_lines,
 )
-from .memory import dream, memories
 from .memory.interview import Interview
-from .messages import Messages, human_duration, next_page_line, paint, say
-from .shelf import Reader, Shelf
-from .skills import SkillLearner
+from .messages import Messages, TerminalVoice, human_duration, next_page_line, paint, say
+from .shelf import Shelf
 from .system import SYSTEM_CHECKS, SYSTEM_WORDS
+from .tinker import Tinker
 lazy from .build.cycle import CycleRunner
 lazy from .build.plan import InterfaceReviewer, SpecWriter
 lazy from .build.project import (
@@ -39,6 +37,7 @@ lazy from .build.project import (
     Project,
     RunChecks,
     Runs,
+    TrackedWork,
     Tracker,
     ending,
     project_store,
@@ -52,7 +51,7 @@ lazy from .knowledge.tutor import Asker, Memory, Teacher
 lazy from .model.models import Calibrator, Models, Ollama, OllamaError
 lazy from .model.thinking import Thinking
 lazy from .prompts import Prompts
-lazy from .ranking import Embeddings, Retriever
+lazy from .ranking import Embeddings
 lazy from .settings import (
     DEFAULT_MAX_STALL,
     ENV_EXAMPLE,
@@ -653,12 +652,12 @@ class Commands:
             "research": self.research,
             "ask": self.ask,
             "teach": self.teach,
-            "read": self.read,
-            "exercise": self.exercise,
+            "read": lambda: self.tinker(["read", *args.read]),
+            "exercise": lambda: self.tinker(["exercise", args.exercise]),
             "knowledge": lambda: self.show_knowledge(args.knowledge),
-            "memory": lambda: self.memory(args.memory, args.yes),
-            "dream": lambda: self.dream(args.dream),
-            "skill": lambda: self.skill(args.skill),
+            "memory": lambda: self.tinker(["memory", *args.memory]),
+            "dream": lambda: self.tinker(["dream", *args.dream]),
+            "skill": lambda: self.tinker(["skill", *args.skill]),
             "runs": self.list_runs,
             "jobs": lambda: self.list_jobs(*args.jobs),
             "stop": lambda: self.stop(args.stop),
@@ -669,6 +668,9 @@ class Commands:
             "doctor": lambda: Doctor().run(),
             "system": lambda: self.system(args.system),
         }
+
+    def tinker(self, words):
+        Tinker(self.args.yes, self.started_at).handle(words, TerminalVoice())
 
     @staticmethod
     def config(words):
@@ -803,18 +805,17 @@ class Commands:
         if definition is not None or TaughtCommands.alias(topic):
             TaughtCommands.teach(topic, definition)
             return
-        self.follow(f"Learning {topic}")
-        self.reported(
-            lambda: self.learning_tools("tinker learn", topic),
+        self.tracked(
+            f"Learning {topic}",
+            lambda tracker: self.learning_tools("tinker learn", topic, tracker),
             lambda tracker, model, embeddings, internet: SlotLearner(
                 model, internet, embeddings, tracker
             ).run(topic),
             blocked=lambda stopped: Commands.blocked(f"Nothing learned about {topic}", stopped),
         )
 
-    def follow(self, title):
-        self.tracker = Tracker(title, started=self.started_at.timestamp())
-        say.follow(self.tracker.heard)
+    def tracked(self, title, setup, work, blocked=None):
+        TrackedWork(self.started_at, TerminalVoice()).run(title, setup, work, blocked)
 
     @staticmethod
     def blocked(headline, stopped):
@@ -825,115 +826,45 @@ class Commands:
 
     def research(self):
         topic = self.args.research
-        self.follow(f"Researching {topic}")
-        self.reported(
-            lambda: self.learning_tools("tinker research", topic),
+        self.tracked(
+            f"Researching {topic}",
+            lambda tracker: self.learning_tools("tinker research", topic, tracker),
             lambda tracker, model, embeddings, internet: Researcher.serving(
                 model, internet, embeddings, tracker
             ).run(topic),
             blocked=lambda stopped: Commands.blocked(f"Nothing found about {topic}", stopped),
         )
 
-    def learning_tools(self, option, request):
+    @staticmethod
+    def learning_tools(option, request, tracker):
         selected = Thinking.checked()
         embeddings = Embeddings.required(option)
-        model = Thinking.for_work(request, self.tracker.phase, WORK_THINK, selected)
+        model = Thinking.for_work(request, tracker.phase, WORK_THINK, selected)
         return LearningTools(model, embeddings, Internet())
 
     def ask(self):
         question = self.args.ask
-        self.follow(f"Asking: {first_line(question, 60)}")
-        self.reported(
-            lambda: (Thinking.for_work(question, self.tracker.phase), Memory()),
+        self.tracked(
+            f"Asking: {first_line(question, 60)}",
+            lambda tracker: (Thinking.for_work(question, tracker.phase), Memory()),
             lambda tracker, model, memory: Asker(model, memory, tracker).answer(question),
         )
 
     def teach(self):
         teaching = self.args.teach
-        self.follow(f"Teaching: {first_line(teaching, 60)}")
-        self.reported(
-            lambda: self.teaching_tools(teaching),
+        self.tracked(
+            f"Teaching: {first_line(teaching, 60)}",
+            lambda tracker: self.teaching_tools(teaching, tracker),
             lambda tracker, model, internet, memory: Teacher(model, internet, memory, tracker).teach(
                 teaching
             ),
         )
 
-    def teaching_tools(self, teaching):
+    @staticmethod
+    def teaching_tools(teaching, tracker):
         selected = Thinking.checked()
         internet = Internet()
-        return Thinking.for_work(teaching, self.tracker.phase, WORK_THINK, selected), internet, Memory()
-
-    def read(self):
-        words = self.args.read
-        if words[0] == "list":
-            return shelf.show_list(
-                int(words[1]) if words[1:] else 1, int(os.environ.get("TINKER_INSIDE") or 0) or None
-            )
-        if words[0] == "show":
-            return shelf.show(job_number(words[1]))
-        if words[0] == "rename":
-            return shelf.renamed(job_number(words[1]), words[2])
-        if words[0] == "forget":
-            return shelf.forgotten([job_number(word) for word in words[1:]], self.args.yes)
-        number = job_number(words[0])
-        if number is None:
-            self.keep_reading(words[0])
-            return
-        if words[1:2] != ["learn"]:
-            shelf.heard_again(number)
-            return shelf.show(number)
-        self.learn_reading(number, " ".join(words[2:]))
-
-    @staticmethod
-    def keep_reading(source):
-        try:
-            shelf.kept(source)
-        except shelf.TooLarge:
-            if not say.agreed(
-                f"{source} is larger than {shelf.READ_MAX_BYTES // 1_000_000} MB: keep it anyway?"
-            ):
-                raise
-            shelf.kept(source, beyond=True)
-
-    def learn_reading(self, number, focus):
-        entry = shelf.known_reading(number)
-        title = entry["title"]
-        if not entry["chapters"]:
-            raise SystemExit(f"#{number} {title} has no chapters to learn from.")
-        self.follow(f"Reading #{number} {first_line(title, 50)}")
-        self.reported(
-            lambda: (Thinking.for_work(f"{title} {focus}", self.tracker.phase, WORK_THINK),),
-            lambda tracker, model: Reader(model, tracker).read(number, focus),
-        )
-
-    def exercise(self):
-        what = self.args.exercise
-        if what.lower() == "status":
-            return practice.show()
-        self.follow(f"Exercising {what}")
-        self.reported(
-            lambda: (Thinking.for_work(what, self.tracker.phase, WORK_THINK),),
-            lambda tracker, model: practice.Exercise(model, tracker).run(what),
-            chats=True,
-        )
-
-    def reported(self, setup, work, chats=False, blocked=None):
-        ended = ending("stopped", f"{self.tracker.state['title']} did not finish")
-        tools = ()
-        try:
-            tools = setup()
-            if chats:
-                conversation.attach(self.tracker)
-            ended = work(self.tracker, *tools)
-        except SystemExit as stopped:
-            ended = blocked(stopped) if blocked else ending("blocked", first_line(str(stopped), 200))
-            raise
-        finally:
-            if tools:
-                Models.remember(tools[0])
-            took = time.time() - self.started_at.timestamp()
-            say.title(f"Time taken: {human_duration(took)}", "⏱️")
-            self.tracker.end(ended, took)
+        return Thinking.for_work(teaching, tracker.phase, WORK_THINK, selected), internet, Memory()
 
     @staticmethod
     def show_knowledge(request=None):
@@ -942,55 +873,6 @@ class Commands:
             Commands.show_graph()
             return
         MemoryBrowser(Graph.build()).show(request)
-
-    @staticmethod
-    def memory(words, yes=False):
-        match words:
-            case ["show", item_id]:
-                memories.show_remembered(item_id)
-            case ["forget", item_id]:
-                memories.forget(item_id, yes)
-            case ["traits"]:
-                memories.show_traits()
-            case ["graph"]:
-                dream.show_memory_graph()
-            case [page]:
-                memories.show_memories(int(page))
-            case _:
-                memories.show_memories(1)
-
-    def dream(self, words):
-        if words == ["graph"] and sys.stdout.isatty():
-            return dream.serve_dream_graph()
-        if words == ["graph"]:
-            return dream.show_memory_graph()
-        if words != ["run"]:
-            return dream.show_dream()
-        self.follow("Dreaming")
-        self.reported(
-            lambda: (),
-            lambda tracker: dream.Dream(Retriever(Embeddings.configured()), tracker.phase).run(),
-        )
-
-    def skill(self, words):
-        match words:
-            case ["list"]:
-                return skills.show_list()
-            case ["forget", name]:
-                return skills.forgotten(name, self.args.yes)
-            case ["learn", name, purpose]:
-                return self.learn_skill(name, purpose)
-        return self.use_skill(skills.known_skill(words[0]), words[1:])
-
-    def use_skill(self, skill, words):
-        self.skill_job(f"Using the skill {skill.name}", lambda: skills.use(skill, words))
-
-    def learn_skill(self, name, purpose):
-        self.skill_job(f"Learning the skill {name}", lambda: SkillLearner.run(name, purpose))
-
-    def skill_job(self, title, ended):
-        self.follow(title)
-        self.reported(lambda: (), lambda tracker: ended())
 
     @staticmethod
     def show_graph():

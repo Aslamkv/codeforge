@@ -8,6 +8,7 @@ import pytest
 from conftest import quick_model_replying
 
 from tinkerkit import skills
+from tinkerkit.build.project import TrackedWork
 from tinkerkit.model.models import LoadedModel, Models
 from tinkerkit.prompts import Prompts
 from tinkerkit.settings import Home
@@ -698,3 +699,103 @@ def test_unknown_skill_says_so_and_lists_the_skills(home_store):
 def test_unknown_skill_with_no_skills_says_there_are_none(home_store):
     with pytest.raises(SystemExit, match="There is no skill ghost\nNo skills yet"):
         skills.known_skill("ghost")
+
+
+class HeardVoice:
+    def __init__(self):
+        self.heard = []
+
+    def agreed(self, question):
+        self.heard.append(("agreed", question))
+        return False
+
+    def follow(self, follower):
+        self.heard.append(("follow",))
+
+    def title(self, text, icon=""):
+        self.heard.append(("title", icon))
+
+
+@pytest.mark.spec("TNK-1", "SKL-8")
+def test_skills_handle_the_skill_command_and_give_forget_the_persons_yes(home_store, monkeypatch):
+    seen = []
+    monkeypatch.setattr(skills, "show_list", lambda: seen.append(("show_list",)))
+    monkeypatch.setattr(skills, "forgotten", lambda name, yes: seen.append(("forgotten", name, yes)))
+    assert Skills.COMMANDS == ("skill",)
+    Skills(False).handle(["skill", "list"], HeardVoice())
+    Skills(True).handle(["skill", "forget", "thumbs"], HeardVoice())
+    assert seen == [("show_list",), ("forgotten", "thumbs", True)]
+
+
+class FakeTracker:
+    def phase(self, step):
+        return f"phase {step}"
+
+
+def skill_job(monkeypatch):
+    seen = []
+
+    def run(work, title, setup, ended, blocked=None):
+        seen.append(("follow", title))
+        seen.append(("ended", ended(FakeTracker(), *setup(FakeTracker()))))
+
+    monkeypatch.setattr(TrackedWork, "run", run)
+    return seen
+
+
+def skill_learning(monkeypatch, result):
+    seen = skill_job(monkeypatch)
+    monkeypatch.setattr(
+        SkillLearner,
+        "learned",
+        staticmethod(lambda name, purpose: seen.append(("learned", name, purpose)) or result),
+    )
+    return seen
+
+
+@pytest.mark.spec("SKL-5", "TNK-1")
+def test_skill_learn_is_a_job_that_ends_with_the_trial_output(home_store, monkeypatch, tmp_path):
+    made = tmp_path / "a.png"
+    seen = skill_learning(monkeypatch, skills.SkillResult(True, [made], "", 10, tmp_path))
+    Skills(False).handle(["skill", "learn", "thumbs", "make a thumbnail"], HeardVoice())
+    assert seen[:2] == [("follow", "Learning the skill thumbs"), ("learned", "thumbs", "make a thumbnail")]
+    assert seen[2][1] == {
+        "status": "done",
+        "headline": "Learned thumbs",
+        "details": [("File", str(made))],
+        "next": [],
+    }
+
+
+def skill_using(monkeypatch, result):
+    seen = skill_job(monkeypatch)
+    monkeypatch.setattr(
+        skills,
+        "skill_used",
+        lambda skill, words: seen.append(("used", skill.name, words)) or result,
+    )
+    return seen
+
+
+@pytest.mark.spec("SKL-6", "TNK-1")
+def test_skill_use_is_a_job_that_ends_with_the_files(home_store, monkeypatch, tmp_path):
+    Skills.put(Skill("thumbs", "convert", "convert {a}", [{"name": "a"}], "", "files", 1))
+    made = tmp_path / "a.png"
+    seen = skill_using(monkeypatch, skills.SkillResult(True, [made], "", 10, tmp_path))
+    Skills(False).handle(["skill", "thumbs", "b.png", "big"], HeardVoice())
+    assert seen[:2] == [("follow", "Using the skill thumbs"), ("used", "thumbs", ["b.png", "big"])]
+    assert seen[2][1] == {
+        "status": "done",
+        "headline": "Used thumbs",
+        "details": [("File", str(made))],
+        "next": [],
+        "files": [str(made)],
+    }
+
+
+@pytest.mark.spec("SKL-6", "TNK-1")
+def test_skill_use_of_an_unknown_name_stops_before_the_job(home_store, monkeypatch):
+    seen = skill_using(monkeypatch, None)
+    with pytest.raises(SystemExit, match="There is no skill ghost"):
+        Skills(False).handle(["skill", "ghost", "x"], HeardVoice())
+    assert seen == []

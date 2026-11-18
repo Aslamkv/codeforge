@@ -8,6 +8,7 @@ import time
 import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
+from ..build.project import Subsystem
 from ..jobs import Jobs
 from ..knowledge.graph import Graph, GraphPage
 from ..messages import say
@@ -24,6 +25,7 @@ from ..settings import (
     Home,
 )
 from ..store import Log
+from . import memories
 from .memories import (
     DREAM,
     Memories,
@@ -47,6 +49,7 @@ from .reflection import (
     trait_added,
 )
 lazy from ..build.project import ending
+lazy from ..ranking import Embeddings, Retriever
 
 TRAIT_KEYS = ("id", "about", "when", "do", "status")
 EPISODE_PLACE_KEYS = ("id", "chat", "time", "dreamt")
@@ -680,3 +683,41 @@ def serve_dream_graph():
     except KeyboardInterrupt:
         live.server.server_close()
         say.done("Stopped.")
+
+
+class Mind(Subsystem):
+    COMMANDS = ("memory", "dream")
+
+    def handle(self, words, voice):
+        if words[0] == "memory":
+            return self.memory(words[1:])
+        return self.dream(words[1:], voice)
+
+    def memory(self, words):
+        match words:
+            case ["show", item_id]:
+                memories.show_remembered(item_id)
+            case ["forget", item_id]:
+                memories.forget(item_id, self.yes)
+            case ["traits"]:
+                memories.show_traits()
+            case ["graph"]:
+                show_memory_graph()
+            case [page]:
+                memories.show_memories(int(page))
+            case _:
+                memories.show_memories(1)
+
+    def dream(self, words, voice):
+        if words == ["graph"] and sys.stdout.isatty():
+            return serve_dream_graph()
+        if words == ["graph"]:
+            return show_memory_graph()
+        if words != ["run"]:
+            return show_dream()
+        self.tracked(
+            voice,
+            "Dreaming",
+            lambda tracker: (),
+            lambda tracker: Dream(Retriever(Embeddings.configured()), tracker.phase).run(),
+        )

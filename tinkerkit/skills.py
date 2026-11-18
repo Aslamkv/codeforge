@@ -8,6 +8,7 @@ import threading
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
+from .build.project import Subsystem
 from .messages import say
 from .model.models import Calibrator, Models, Ollama, OllamaError
 from .prompts import Prompts, Reply
@@ -121,7 +122,28 @@ def forgotten(name, yes=False):
     say.done(f"Forgot the skill {name}.")
 
 
-class Skills:
+class Skills(Subsystem):
+    COMMANDS = ("skill",)
+
+    def handle(self, words, voice):
+        match words[1:]:
+            case ["list"]:
+                return show_list()
+            case ["forget", name]:
+                return forgotten(name, self.yes)
+            case ["learn", name, purpose]:
+                return self.learn_skill(name, purpose, voice)
+        return self.use_skill(known_skill(words[1]), words[2:], voice)
+
+    def use_skill(self, skill, words, voice):
+        self.skill_job(f"Using the skill {skill.name}", lambda: use(skill, words), voice)
+
+    def learn_skill(self, name, purpose, voice):
+        self.skill_job(f"Learning the skill {name}", lambda: SkillLearner.run(name, purpose), voice)
+
+    def skill_job(self, title, ended, voice):
+        self.tracked(voice, title, lambda tracker: (), lambda tracker: ended())
+
     @staticmethod
     def put(skill):
         Home.store().put(COLLECTION, skill.name, skill.to_dict())

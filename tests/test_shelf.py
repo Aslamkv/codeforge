@@ -873,3 +873,46 @@ def test_in_a_chat_the_reading_list_marks_the_one_the_person_is_inside(tmp_path,
     assert len(marked) == 1 and "#1 " in marked[0] and marked[0].endswith(" ← inside")
     show_list()
     assert "← inside" not in capsys.readouterr().out
+
+
+class AskedVoice:
+    def __init__(self, answer):
+        self.answer, self.asked = answer, []
+
+    def agreed(self, question):
+        self.asked.append(question)
+        return self.answer
+
+    def follow(self, follower):
+        pass
+
+    def title(self, text, icon=""):
+        pass
+
+
+@pytest.mark.spec("TNK-1", "RDG-14")
+def test_the_shelf_handles_the_read_command_and_gives_forget_the_persons_yes(home_store, monkeypatch):
+    seen = []
+    monkeypatch.delenv("TINKER_INSIDE", raising=False)
+    monkeypatch.setattr(shelf, "show_list", lambda page, inside: seen.append(("show_list", page, inside)))
+    monkeypatch.setattr(shelf, "forgotten", lambda numbers, yes: seen.append(("forgotten", numbers, yes)))
+    assert Shelf.COMMANDS == ("read",)
+    Shelf(False).handle(["read", "list"], AskedVoice(False))
+    Shelf(True).handle(["read", "forget", "#1", "#2"], AskedVoice(False))
+    assert seen == [("show_list", 1, None), ("forgotten", [1, 2], True)]
+
+
+@pytest.mark.spec("TNK-1")
+def test_the_shelf_asks_its_voice_before_keeping_a_large_reading(home_store, monkeypatch):
+    kept = []
+
+    def keeping(source, beyond=False):
+        if not beyond:
+            raise shelf.TooLarge("too large")
+        kept.append(source)
+
+    monkeypatch.setattr(shelf, "kept", keeping)
+    voice = AskedVoice(True)
+    Shelf(False).handle(["read", "big.pdf"], voice)
+    assert kept == ["big.pdf"]
+    assert voice.asked == [f"big.pdf is larger than {READ_MAX_BYTES // 1_000_000} MB: keep it anyway?"]

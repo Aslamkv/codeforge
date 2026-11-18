@@ -1,4 +1,5 @@
 import argparse
+import datetime
 import io
 import json
 import os
@@ -10,6 +11,7 @@ from pathlib import Path
 import pytest
 from conftest import criterion, plan_of, record_of
 
+from tinkerkit.build import project as project_module
 from tinkerkit.build.project import (
     Brief,
     Cycle,
@@ -21,14 +23,17 @@ from tinkerkit.build.project import (
     Runs,
     SpecDocument,
     Steps,
+    Subsystem,
     Tracked,
+    TrackedWork,
     Tracker,
     ending,
     project_store,
     saved,
 )
 from tinkerkit.jobs import Jobs
-from tinkerkit.messages import Message, say
+from tinkerkit.messages import Message, Voice, say
+from tinkerkit.model.models import Models
 from tinkerkit.prompts import Part
 from tinkerkit.settings import EXERCISE_ENV, FIX_PHASES, PHASES, Home
 from tinkerkit.store import Log
@@ -691,3 +696,139 @@ def test_a_tracked_step_moves_its_tracker_and_says_the_step_when_told(monkeypatc
     assert (
         tracked.tracker.state["step"] == "survey" and tracked.tracker.state["outcome"] == "2 core chapter(s)"
     )
+
+
+class HeardVoice(Voice):
+    def __init__(self):
+        self.heard = []
+
+    def follow(self, follower):
+        self.heard.append(("follow", follower))
+
+    def title(self, text, icon=""):
+        self.heard.append(("title", text))
+
+
+@pytest.fixture
+def tracked_work(monkeypatch):
+    seen = {"remembered": []}
+
+    class Followed:
+        heard = "heard"
+
+        def __init__(self, title, started=None):
+            seen["title"], seen["started"] = title, started
+
+        def end(self, ended, took):
+            seen["ended"], seen["took"] = ended, took
+
+    monkeypatch.setattr(project_module, "Tracker", Followed)
+    monkeypatch.setattr(Models, "remember", staticmethod(seen["remembered"].append))
+    return seen
+
+
+def thirty_seconds_ago():
+    return datetime.datetime.now() - datetime.timedelta(seconds=30)
+
+
+@pytest.mark.spec("CLI-10")
+def test_a_job_never_unloads_its_model_when_it_ends(tracked_work, fake_ollama):
+    class Kept:
+        name = "m"
+
+        def unload(self):
+            raise AssertionError("the job unloaded its model")
+
+    TrackedWork(thirty_seconds_ago(), HeardVoice()).run(
+        "Asking", lambda tracker: (Kept(),), lambda tracker, model: ending("done", "asked")
+    )
+    assert fake_ollama.unloaded == []
+
+
+@pytest.mark.spec("PRJ-17")
+def test_a_jobs_clock_counts_from_its_process_start(tracked_work):
+    started_at = thirty_seconds_ago()
+    voice = HeardVoice()
+    TrackedWork(started_at, voice).run("Asking", lambda tracker: (), lambda tracker: ending("done", "asked"))
+    assert tracked_work["started"] == started_at.timestamp()
+    assert tracked_work["took"] >= 30
+    assert voice.heard[-1] == ("title", "Time taken: 30s")
+
+
+@pytest.mark.spec("PRJ-19")
+def test_tracked_work_follows_its_tracker_and_ends_it_with_the_works_ending(tracked_work):
+    voice = HeardVoice()
+    given = []
+
+    def setup(tracker):
+        given.append(tracker)
+        return "model", "memory"
+
+    def work(tracker, model, memory):
+        given.append((tracker, model, memory))
+        return ending("done", "asked")
+
+    TrackedWork(thirty_seconds_ago(), voice).run("Asking", setup, work)
+    assert voice.heard[0] == ("follow", "heard")
+    assert given[1] == (given[0], "model", "memory")
+    assert tracked_work["title"] == "Asking"
+    assert tracked_work["ended"] == ending("done", "asked")
+    assert tracked_work["remembered"] == ["model"]
+
+
+@pytest.mark.spec("PRJ-19")
+def test_a_stop_ends_tracked_work_as_blocked_with_the_first_line_of_why(tracked_work):
+    def stopping(tracker, model):
+        raise SystemExit("no room\nmore")
+
+    with pytest.raises(SystemExit):
+        TrackedWork(thirty_seconds_ago(), HeardVoice()).run("Asking", lambda tracker: ("model",), stopping)
+    assert tracked_work["ended"] == ending("blocked", "no room")
+    assert tracked_work["remembered"] == ["model"]
+
+
+@pytest.mark.spec("PRJ-19")
+def test_a_stop_during_setup_ends_tracked_work_with_its_own_blocked_ending(tracked_work):
+    def not_installed(tracker):
+        raise SystemExit("Model m is not installed.")
+
+    with pytest.raises(SystemExit):
+        TrackedWork(thirty_seconds_ago(), HeardVoice()).run(
+            "Asking",
+            not_installed,
+            lambda tracker: None,
+            blocked=lambda stopped: ending("blocked", str(stopped)),
+        )
+    assert tracked_work["ended"] == ending("blocked", "Model m is not installed.")
+    assert tracked_work["remembered"] == []
+
+
+@pytest.mark.spec("PRJ-19")
+def test_tracked_work_that_nothing_ended_is_stopped(tracked_work):
+    def interrupted(tracker):
+        raise KeyboardInterrupt
+
+    with pytest.raises(KeyboardInterrupt):
+        TrackedWork(thirty_seconds_ago(), HeardVoice()).run("Asking", lambda tracker: (), interrupted)
+    assert tracked_work["ended"] == ending("stopped", "Asking did not finish")
+
+
+@pytest.mark.spec("TNK-1")
+def test_a_subsystem_runs_its_jobs_as_tracked_work_from_its_start(tracked_work):
+    started_at = thirty_seconds_ago()
+    voice = HeardVoice()
+    Subsystem(True, started_at).tracked(
+        voice, "Dreaming", lambda tracker: (), lambda tracker: ending("done", "dreamt")
+    )
+    assert tracked_work["title"] == "Dreaming"
+    assert tracked_work["started"] == started_at.timestamp()
+    assert tracked_work["ended"] == ending("done", "dreamt")
+    assert voice.heard[0] == ("follow", "heard")
+
+
+@pytest.mark.spec("TNK-1")
+def test_a_subsystem_says_no_and_starts_now_unless_told():
+    before = datetime.datetime.now()
+    subsystem = Subsystem()
+    assert subsystem.yes is False
+    assert before <= subsystem.started_at <= datetime.datetime.now()

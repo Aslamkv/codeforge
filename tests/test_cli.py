@@ -7,7 +7,8 @@ import sys
 import pytest
 from conftest import MEASURED, MODEL, PY, TOOLCHAIN, criterion, file_block, plan_of, record_of
 
-from tinkerkit import cli, logger
+from tinkerkit import cli, logger, skills, tinker
+from tinkerkit.build import project
 from tinkerkit.build.project import Runs, Tracker, project_store
 from tinkerkit.build.session import Stopped
 from tinkerkit.cli import Cli, Commands, Doctor, ProjectFolder, ProjectRun
@@ -661,35 +662,9 @@ def followed(monkeypatch):
         def phase(self, doing):
             pass
 
-    monkeypatch.setattr(cli, "Tracker", Followed)
+    monkeypatch.setattr(project, "Tracker", Followed)
     monkeypatch.setattr(cli.say, "follow", lambda heard: None)
     return seen
-
-
-@pytest.mark.spec("CLI-10")
-def test_a_job_never_unloads_its_model_when_it_ends(monkeypatch, fake_ollama, followed):
-    class Kept:
-        name = "m"
-
-        def unload(self):
-            raise AssertionError("the job unloaded its model")
-
-    monkeypatch.setattr(Models, "remember", staticmethod(lambda model: None))
-    commands = Commands(parse("ask", "a"))
-    commands.follow("Asking")
-    commands.reported(lambda: (Kept(),), lambda tracker, model: cli.ending("done", "asked"))
-    assert fake_ollama.unloaded == []
-
-
-@pytest.mark.spec("PRJ-17")
-def test_a_jobs_clock_counts_from_its_process_start(monkeypatch, followed):
-    started_at = datetime.datetime.now() - datetime.timedelta(seconds=30)
-    monkeypatch.setattr(Models, "remember", staticmethod(lambda model: None))
-    commands = Commands(parse("ask", "a"), started_at)
-    commands.follow("Asking")
-    commands.reported(lambda: (object(),), lambda tracker, model: cli.ending("done", "asked"))
-    assert followed["started"] == started_at.timestamp()
-    assert followed["took"] >= 30
 
 
 @pytest.mark.spec("PRJ-17")
@@ -728,7 +703,7 @@ def test_a_job_follows_its_tracker_before_it_checks_its_model(words, monkeypatch
 
     monkeypatch.setattr(Thinking, "checked", staticmethod(checking))
     with pytest.raises(SystemExit):
-        getattr(Commands(parse(*words)), words[0])()
+        Commands(parse(*words)).run()
     assert checked == [True]
 
 
@@ -736,8 +711,8 @@ def test_a_job_follows_its_tracker_before_it_checks_its_model(words, monkeypatch
 @pytest.mark.parametrize(
     "command, tools",
     [
-        ("teach", lambda commands: commands.teaching_tools("a topic")),
-        ("learn", lambda commands: commands.learning_tools("learn", "a topic")),
+        ("teach", lambda commands, tracker: commands.teaching_tools("a topic", tracker)),
+        ("learn", lambda commands, tracker: commands.learning_tools("learn", "a topic", tracker)),
     ],
 )
 def test_teach_and_learn_ask_for_their_model_at_least_at_the_work_level(command, tools, monkeypatch):
@@ -750,9 +725,8 @@ def test_teach_and_learn_ask_for_their_model_at_least_at_the_work_level(command,
     )
     monkeypatch.setattr(cli.Embeddings, "required", staticmethod(lambda option: None))
     monkeypatch.setattr(cli, "LearningTools", lambda model, embeddings, internet: None)
-    commands = Commands(parse(command, "a topic"))
-    commands.tracker = type("Followed", (), {"phase": staticmethod(lambda doing: None)})()
-    tools(commands)
+    tracker = type("Followed", (), {"phase": staticmethod(lambda doing: None)})()
+    tools(Commands(parse(command, "a topic")), tracker)
     assert asked == [WORK_THINK]
 
 
@@ -998,27 +972,26 @@ def test_knowledge_refuses_words_it_cannot_read(home_store, capsys):
         assert "tinker knowledge NAME [KIND] [PAGE]" in capsys.readouterr().err
 
 
-@pytest.mark.spec("REM-7", "REM-8", "REM-9", "REM-10")
-def test_memory_runs_the_memory_views(home_store, monkeypatch):
+@pytest.mark.spec("TNK-1", "REM-7", "DRM-8")
+def test_memory_and_dream_words_go_to_the_mind_with_the_persons_yes(home_store, monkeypatch):
     seen = []
-    for view in ("show_memories", "show_remembered", "forget", "show_traits"):
-        monkeypatch.setattr(cli.memories, view, lambda *given, view=view: seen.append((view, *given)))
-    for words in (
-        [],
-        ["2"],
-        ["show", "a1b2c3"],
-        ["forget", "a1b2c3", "--yes"],
-        ["forget", "d4e5f6"],
-        ["traits"],
-    ):
-        Commands(parse("memory", *words)).run()
+
+    class HeardMind:
+        COMMANDS = ("memory", "dream")
+
+        def __init__(self, yes, started_at):
+            self.yes = yes
+
+        def handle(self, words, voice):
+            seen.append((self.yes, words, type(voice).__name__))
+
+    monkeypatch.setattr(tinker, "Mind", HeardMind)
+    for words in (["memory"], ["memory", "forget", "a1b2c3", "--yes"], ["dream", "run"]):
+        Commands(parse(*words)).run()
     assert seen == [
-        ("show_memories", 1),
-        ("show_memories", 2),
-        ("show_remembered", "a1b2c3"),
-        ("forget", "a1b2c3", True),
-        ("forget", "d4e5f6", False),
-        ("show_traits",),
+        (False, ["memory"], "TerminalVoice"),
+        (True, ["memory", "forget", "a1b2c3"], "TerminalVoice"),
+        (False, ["dream", "run"], "TerminalVoice"),
     ]
 
 
@@ -1038,33 +1011,6 @@ def test_memory_refuses_words_it_cannot_read(home_store, capsys):
         assert "| traits | graph" in capsys.readouterr().err
 
 
-@pytest.mark.spec("DRM-8", "CMD-1")
-def test_dream_shows_the_dream_state_and_dream_run_dreams_with_the_tracker_phases(home_store, monkeypatch):
-    seen = []
-    monkeypatch.setattr(cli.dream, "show_dream", lambda: seen.append("show_dream"))
-    monkeypatch.setattr(Commands, "follow", lambda self, title: seen.append(("follow", title)))
-    monkeypatch.setattr(
-        Commands,
-        "reported",
-        lambda self, setup, work: seen.append(("reported", setup(), work(FakeTracker(), *setup()))),
-    )
-    monkeypatch.setattr(
-        "tinkerkit.memory.dream.Dream.run",
-        lambda dream: seen.append(("run", dream.phase("consolidate"))) or {"status": "done"},
-    )
-    for words in ([], ["status"], ["run"]):
-        Commands(parse("dream", *words)).run()
-    assert seen[:2] == ["show_dream", "show_dream"]
-    assert seen[2] == ("follow", "Dreaming")
-    assert seen[3] == ("run", "phase consolidate")
-    assert seen[4][:2] == ("reported", ()) and seen[4][2]["status"] == "done"
-
-
-class FakeTracker:
-    def phase(self, step):
-        return f"phase {step}"
-
-
 @pytest.mark.spec("DRM-8")
 def test_dream_refuses_words_it_cannot_read(home_store, capsys):
     for wrong in (["now"], ["run", "now"], ["status", "run"], ["graph", "now"]):
@@ -1076,51 +1022,19 @@ def test_dream_refuses_words_it_cannot_read(home_store, capsys):
 @pytest.mark.spec("SKL-8", "CMD-1")
 def test_skill_list_and_forget_glance_at_the_skills(home_store, monkeypatch):
     seen = []
-    monkeypatch.setattr(cli.skills, "show_list", lambda: seen.append(("show_list",)))
-    monkeypatch.setattr(cli.skills, "forgotten", lambda name, yes: seen.append(("forgotten", name, yes)))
+    monkeypatch.setattr(skills, "show_list", lambda: seen.append(("show_list",)))
+    monkeypatch.setattr(skills, "forgotten", lambda name, yes: seen.append(("forgotten", name, yes)))
     for words in (["list"], ["forget", "thumbs"], ["forget", "thumbs", "--yes"]):
         Commands(parse("skill", *words)).run()
     assert seen == [("show_list",), ("forgotten", "thumbs", False), ("forgotten", "thumbs", True)]
 
 
-def skill_job(monkeypatch):
+@pytest.mark.spec("SKL-5", "TNK-1")
+def test_skill_learn_without_purpose_learns_with_an_empty_purpose(home_store, monkeypatch):
     seen = []
-    monkeypatch.setattr(Commands, "follow", lambda self, title: seen.append(("follow", title)))
-    monkeypatch.setattr(
-        Commands, "reported", lambda self, setup, work: seen.append(("ended", work(FakeTracker(), *setup())))
-    )
-    return seen
-
-
-def skill_learning(monkeypatch, result):
-    seen = skill_job(monkeypatch)
-    monkeypatch.setattr(
-        cli.SkillLearner,
-        "learned",
-        staticmethod(lambda name, purpose: seen.append(("learned", name, purpose)) or result),
-    )
-    return seen
-
-
-@pytest.mark.spec("SKL-5")
-def test_skill_learn_is_a_job_that_ends_with_the_trial_output(home_store, monkeypatch, tmp_path):
-    made = tmp_path / "a.png"
-    seen = skill_learning(monkeypatch, cli.skills.SkillResult(True, [made], "", 10, tmp_path))
-    Commands(parse("skill", "learn", "thumbs", "make", "a", "thumbnail")).run()
-    assert seen[:2] == [("follow", "Learning the skill thumbs"), ("learned", "thumbs", "make a thumbnail")]
-    assert seen[2][1] == {
-        "status": "done",
-        "headline": "Learned thumbs",
-        "details": [("File", str(made))],
-        "next": [],
-    }
-
-
-@pytest.mark.spec("SKL-5")
-def test_skill_learn_without_purpose_learns_with_an_empty_purpose(home_store, monkeypatch, tmp_path):
-    seen = skill_learning(monkeypatch, cli.skills.SkillResult(False, [], "", 10, tmp_path))
+    monkeypatch.setattr(skills.Skills, "handle", lambda self, words, voice: seen.append((self.yes, words)))
     Commands(parse("skill", "learn", "thumbs")).run()
-    assert seen[1] == ("learned", "thumbs", "")
+    assert seen == [(False, ["skill", "learn", "thumbs", ""])]
 
 
 @pytest.mark.spec("SKL-8")
@@ -1129,25 +1043,6 @@ def test_skill_refuses_words_it_cannot_read(home_store, capsys):
         with pytest.raises(SystemExit):
             parse("skill", *wrong)
         assert "tinker skill learn NAME [PURPOSE] | list | forget NAME" in capsys.readouterr().err
-
-
-@pytest.mark.spec("DRM-9")
-def test_memory_graph_and_dream_graph_write_the_memory_page(home_store, monkeypatch):
-    seen = []
-    monkeypatch.setattr(cli.dream, "show_memory_graph", lambda: seen.append("show_memory_graph"))
-    Commands(parse("memory", "graph")).run()
-    Commands(parse("dream", "graph")).run()
-    assert seen == ["show_memory_graph", "show_memory_graph"]
-
-
-@pytest.mark.spec("DRM-9")
-def test_dream_graph_in_a_terminal_serves_the_live_page(home_store, monkeypatch):
-    seen = []
-    monkeypatch.setattr(cli.sys.stdout, "isatty", lambda: True)
-    monkeypatch.setattr(cli.dream, "serve_dream_graph", lambda: seen.append("serve_dream_graph"))
-    monkeypatch.setattr(cli.dream, "show_memory_graph", lambda: seen.append("show_memory_graph"))
-    Commands(parse("dream", "graph")).run()
-    assert seen == ["serve_dream_graph"]
 
 
 @pytest.mark.spec("CLI-9", "PLN-8")
@@ -1297,39 +1192,3 @@ def test_a_job_keeps_the_computer_awake_and_a_glance_does_not(home_store):
     assert Cli.works_for_hours(Cli.parse(["model", "calibrate", "qwen3"]))
     assert not Cli.works_for_hours(Cli.parse(["model", "qwen3"]))
     assert not Cli.works_for_hours(Cli.parse(["runs"]))
-
-
-def skill_using(monkeypatch, result):
-    seen = skill_job(monkeypatch)
-    monkeypatch.setattr(
-        cli.skills,
-        "skill_used",
-        lambda skill, words: seen.append(("used", skill.name, words)) or result,
-    )
-    return seen
-
-
-@pytest.mark.spec("SKL-6")
-def test_skill_use_is_a_job_that_ends_with_the_files(home_store, monkeypatch, tmp_path):
-    cli.skills.Skills.put(
-        cli.skills.Skill("thumbs", "convert", "convert {a}", [{"name": "a"}], "", "files", 1)
-    )
-    made = tmp_path / "a.png"
-    seen = skill_using(monkeypatch, cli.skills.SkillResult(True, [made], "", 10, tmp_path))
-    Commands(parse("skill", "thumbs", "b.png", "big")).run()
-    assert seen[:2] == [("follow", "Using the skill thumbs"), ("used", "thumbs", ["b.png", "big"])]
-    assert seen[2][1] == {
-        "status": "done",
-        "headline": "Used thumbs",
-        "details": [("File", str(made))],
-        "next": [],
-        "files": [str(made)],
-    }
-
-
-@pytest.mark.spec("SKL-6")
-def test_skill_use_of_an_unknown_name_stops_before_the_job(home_store, monkeypatch):
-    seen = skill_using(monkeypatch, None)
-    with pytest.raises(SystemExit, match="There is no skill ghost"):
-        Commands(parse("skill", "ghost", "x")).run()
-    assert seen == []

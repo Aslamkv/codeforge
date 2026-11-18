@@ -5,12 +5,14 @@ import re
 import sys
 from collections import namedtuple
 lazy import base64
+lazy import os
 lazy import shutil
 lazy import subprocess
 lazy import tempfile
 lazy import urllib.parse
 lazy from pathlib import Path
 
+from .build.project import Subsystem
 from .messages import next_page_line, say
 lazy from .build.project import Tracked, ending
 lazy from .formats import Book, opened
@@ -18,6 +20,7 @@ lazy from .jobs import job_number
 lazy from .knowledge.library import Library, mentions, relevant_chunks
 lazy from .knowledge.principles import Inducer, Principles
 lazy from .model.models import Models, Ollama, OllamaError
+lazy from .model.thinking import Thinking
 lazy from .prompts import Part, Prompts
 lazy from .ranking import Embeddings, Retriever, traits_part
 lazy from .settings import (
@@ -31,6 +34,7 @@ lazy from .settings import (
     READ_INDEX_TERMS,
     READ_KEY_TERMS,
     READ_MAX_BYTES,
+    WORK_THINK,
     Home,
     Numbered,
     confirm_deletion,
@@ -409,7 +413,51 @@ def answered_inside(number, question):
     return Models.quick_reply([system, inside_question(entry, question)], Senses.REPLY_TOKENS)
 
 
-class Shelf:
+class Shelf(Subsystem):
+    COMMANDS = ("read",)
+
+    def handle(self, words, voice):
+        words = words[1:]
+        if words[0] == "list":
+            return show_list(
+                int(words[1]) if words[1:] else 1, int(os.environ.get("TINKER_INSIDE") or 0) or None
+            )
+        if words[0] == "show":
+            return show(job_number(words[1]))
+        if words[0] == "rename":
+            return renamed(job_number(words[1]), words[2])
+        if words[0] == "forget":
+            return forgotten([job_number(word) for word in words[1:]], self.yes)
+        number = job_number(words[0])
+        if number is None:
+            Shelf.keep_reading(words[0], voice)
+            return
+        if words[1:2] != ["learn"]:
+            heard_again(number)
+            return show(number)
+        self.learn_reading(number, " ".join(words[2:]), voice)
+
+    @staticmethod
+    def keep_reading(source, voice):
+        try:
+            kept(source)
+        except TooLarge:
+            if not voice.agreed(f"{source} is larger than {READ_MAX_BYTES // 1_000_000} MB: keep it anyway?"):
+                raise
+            kept(source, beyond=True)
+
+    def learn_reading(self, number, focus, voice):
+        entry = known_reading(number)
+        title = entry["title"]
+        if not entry["chapters"]:
+            raise SystemExit(f"#{number} {title} has no chapters to learn from.")
+        self.tracked(
+            voice,
+            f"Reading #{number} {first_line(title, 50)}",
+            lambda tracker: (Thinking.for_work(f"{title} {focus}", tracker.phase, WORK_THINK),),
+            lambda tracker, model: Reader(model, tracker).read(number, focus),
+        )
+
     def entered(self, words):
         entry = self.found(words)
         return (entry["number"], entry["title"]) if entry and entry["chapters"] else None

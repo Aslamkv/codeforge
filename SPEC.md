@@ -65,7 +65,7 @@ with a dot, and each imports only the modules listed above it:
 
 | Module | Responsibility |
 |---|---|
-| `messages` | everything Tinker tells the person, in one voice (`say`, `Messages`, `Message`): each message's kind gives its icon, sections nest it, followers (a tracker) get it as data, and details go to the log only |
+| `messages` | everything Tinker tells the person, in one voice (`say`, `Messages`, `Message`, and `Voice`, `TerminalVoice` for subsystems): each message's kind gives its icon, sections nest it, followers (a tracker) get it as data, and details go to the log only |
 | `text` | plain text helpers every module shares |
 | `store` | one SQLite database of documents and logs (`Store`, `Log`) |
 | `settings` | the numbers and fixed names more than one part shares (a module's own stay with it); the Tinker home (`Home`) and its database, the settings table (`SETTINGS`, `Config`), numbered lists (`Numbered`), the one way to delete (`confirm_deletion`) |
@@ -80,7 +80,7 @@ with a dot, and each imports only the modules listed above it:
 | `model.quality` | calibration's quality tasks and how a reply is scored against them (`tasks`, `tiers`, `solves`) |
 | `model.models` | the local model: Ollama's API, one request with its budgets and retries (`Model`), measuring a model (`Calibrator`), measured models (`Models`) |
 | `model.thinking` | each request's one thinking level (`RequestReview`, `RequestWords`) |
-| `build.project` | the plan and its record (`Project`, `Cycle`, `SpecDocument`, `Runs`, `RunChecks`, `Brief`, `Outcome`), the run's `Tracker` and its `ending`, and the step pipeline (`Steps`) with what moves a tracker through it (`Tracked`) |
+| `build.project` | the plan and its record (`Project`, `Cycle`, `SpecDocument`, `Runs`, `RunChecks`, `Brief`, `Outcome`), the run's `Tracker` and its `ending`, a command's tracked job (`TrackedWork`), and the step pipeline (`Steps`) with what moves a tracker through it (`Tracked`) |
 | `web.fetcher` | the web plugin's page fetcher, used by `web.internet` alone: pages read straight from their sites, in parallel, with the standard library only (`Fetcher`, `Fetched`) |
 | `web.search` | the search engines the web plugin asks, used by `web.internet` alone: open engines with no key, with the standard library only (`SearchEngine`, `Mwmbl`, `MediaWiki`, `Wikipedia`, `Wikibooks`) |
 | `web.passages` | every page read as text: an HTML page's main content as blocks, and fetched pages as passages under headings, repeats dropped (`Cleaner`, `MainBlocks`, `Page`, `Passage`) |
@@ -95,18 +95,19 @@ with a dot, and each imports only the modules listed above it:
 | `knowledge.curriculum` | learning a language or a tool by its slots (`SlotLearner`, `DocCache`, `LearnStopped`) |
 | `knowledge.graph` | what Tinker knows as one graph of items and links (`Graph`), the page that shows it (`GraphPage`), and browsing it in pages (`MemoryBrowser`) |
 | `memory.reflection` | thinking about who the person is and who Tinker is for them, from what the dreams kept, into candidate traits and questions that wait (`Reflection`) |
-| `memory.dream` | the dream: turning fresh episodes into memories while the queue is idle, revising and fading them, reflecting on them, and the live page that shows it (`Dream`, `DreamPage`) |
+| `memory.dream` | the dream: turning fresh episodes into memories while the queue is idle, revising and fading them, reflecting on them, and the live page that shows it (`Dream`, `DreamPage`), and the memory and dream commands (`Mind`) |
 | `memory.interview` | the dialogue: opening the questions that wait, talking each through with the person and turning what they say into trait changes (`Interview`) |
-| `shelf` | what the person gives to read: kept on the shelf (`Readings`), asked about inside a chat, and learned from chapter by chapter on request (`Reader`) |
+| `shelf` | what the person gives to read: kept on the shelf (`Readings`), asked about inside a chat, and learned from chapter by chapter on request (`Reader`), and the read command (`Shelf`) |
 | `sandbox` | running a check with no network and writes only in its own folder, one backend per platform (`Sandbox`, `MacSandbox`, `LinuxSandbox`, `NoSandbox`) |
 | `knowledge.checks` | running a check of what is taught: SQL in a confined database, a command in the sandbox (`Check`, `SqlCheck`, `CommandCheck`) |
 | `knowledge.tutor` | asking what Tinker keeps (`Asker`), checked by running when it can, and teaching it, checked before anything changes (`Teacher`, `Memory`, `Verdict`) |
-| `practice` | practising a language on its own, giving way to the person (`Exercise`, `Exercises`) |
+| `practice` | practising a language on its own, giving way to the person (`Exercise`, `Exercises`), and the exercise command (`Practice`) |
 | `build.session` | what every phase works through (`Session`), and the phase contract (`Worker`, `Phase`) |
 | `build.plan` | recall, the spec, the contracts where files meet, and their review |
 | `build.code` | setup, the tests, the code, and fixing until every test passes |
 | `build.finish` | tidy, the README, the final review and the lessons |
 | `build.cycle` | the cycle of phases: which phase class does each phase, and running them in order (`CycleRunner`, `PHASE_CLASSES`) |
+| `tinker` | the subsystems behind the command words (`Tinker`) |
 | `logger` | the trace of what Tinker does, wrapped around chosen methods from outside, so no other module knows it (`install`, `uninstall`, `WATCHED`, `TraceLog`) |
 | `cli` | the main system: the command line (`Cli`, `Commands`, `Doctor`), one run (`ProjectRun`, `ProjectFolder`) |
 
@@ -270,6 +271,9 @@ Everything Tinker tells the person goes through one voice, `say` (a `Messages`).
   an alternative in its synopsis, at most one bracket deep, each once) that start with it, then those that hold
   it. `CommandMenu` shows them as it shows commands, each row `/name word`; Tab fills the line with
   `/name word ` and Enter sends `/name word`.
+- **MSG-11** A `Voice` is how a subsystem talks with the person: `agreed(question)` asks a yes or no question,
+  `follow(follower)` hands every message to a follower too (a tracker), and `title(text, icon)` says a title.
+  `TerminalVoice` says them through `say`, so what the person sees is unchanged.
 
 ## text (TXT)
 
@@ -909,6 +913,13 @@ Each request's one thinking level.
   ready` from its start; `📦 Loading the model into memory` before its first model call, only when the model
   in use is not in memory (Ollama's loaded models); `🧭 Working out how much thought your request needs` while
   the request review (**RVW**) asks the model, never when it rules without one.
+- **PRJ-19** `TrackedWork(started_at, voice).run(title, setup, work, blocked=None)` runs a command's job: the
+  voice follows a new `Tracker` titled `title`, `setup(tracker)` gives the job's tools and `work(tracker,
+  *tools)` its ending. When it stops (`SystemExit`) the ending is `blocked(stopped)`, or without one `blocked`
+  with the first line of why; it is `stopped` when nothing ended it. However it ends, it remembers the model
+  (the first tool, **MOD-1**), says `Time taken` counted from `started_at` (**PRJ-17**) and ends the tracker
+  with the ending, then lets the stop go on. Learn, research, ask, teach, read, dream run, skill and exercise
+  jobs all run this way.
 
 ## web.fetcher (FET)
 
@@ -2228,6 +2239,18 @@ Tidy, the README, the final review and the lessons.
   the run's end says why from it. A phase that stops with parked criteria gives False. It gives `awaiting`
   after a phase that `confirms` when the cycle waits for confirmation (**CLI-8**), and `done` otherwise. Each
   phase done says its `outcome` to the tracker.
+
+## tinker (TNK)
+
+- **TNK-1** A subsystem has `COMMANDS`, the command words it serves, and `handle(words, voice)`: given the
+  command word and the words after it, it parses them, decides, works and reports through the voice (**MSG-11**),
+  its jobs through `TrackedWork` (**PRJ-19**). The subsystems are `Shelf` (`read`, **RDG-14**), `Mind`
+  (`memory`, **REM-7**–**REM-10**, and `dream`, **DRM-8**, **DRM-9**), `Skills` (`skill`) and `Practice`
+  (`exercise`, **EXR**); each is a `Subsystem`, built with `yes`, the person's `--yes`, which a deletion it asks
+  for takes (**SET-8**), and the command's start time (now by default), from which its tracked work is timed. An exercise's job attaches its tracker to the chat (**CNV**) after its setup, before its work.
+- **TNK-2** `Tinker(yes)` maps each command word to the subsystem whose `COMMANDS` holds it, and
+  `handle(words, voice)` hands the words to that subsystem. `Commands` hands `read`, `memory`, `dream`, `skill`
+  and `exercise` to it with a `TerminalVoice`; what the person sees is unchanged.
 
 ## logger (LOG)
 

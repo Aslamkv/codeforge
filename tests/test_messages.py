@@ -16,7 +16,9 @@ from tinkerkit.messages import (
     LineEditor,
     Message,
     Messages,
+    TerminalVoice,
     Text,
+    Voice,
     human_duration,
     key_named,
     keys_in,
@@ -91,6 +93,46 @@ def test_followers_are_given_each_message_as_data(capsys):
     with say.section():
         say.warn("No network")
     assert heard == [Message("warn", "No network", 1, "⚠️")] and "No network" in capsys.readouterr().out
+
+
+@pytest.mark.spec("MSG-11")
+def test_a_terminal_voice_says_a_title_as_say_does(capsys):
+    say.title("Learning Flask", "📚")
+    said = capsys.readouterr().out
+    TerminalVoice().title("Learning Flask", "📚")
+    assert capsys.readouterr().out == said == "\n📚 Learning Flask\n"
+
+
+@pytest.mark.spec("MSG-11")
+def test_a_terminal_voice_hands_each_message_to_its_follower():
+    heard = []
+    TerminalVoice().follow(heard.append)
+    say.warn("No network")
+    assert heard == [Message("warn", "No network", 0, "⚠️")]
+
+
+@pytest.mark.spec("MSG-11")
+@pytest.mark.parametrize(("answer", "agreed"), [("y", True), ("n", False)])
+def test_a_terminal_voice_asks_as_say_does(monkeypatch, answer, agreed):
+    asked = []
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
+    monkeypatch.setattr("builtins.input", lambda question: asked.append(question) or answer)
+    assert TerminalVoice().agreed("Get it?") is agreed
+    assert asked == ["Get it? [y/N] "]
+
+
+@pytest.mark.spec("MSG-11")
+@pytest.mark.parametrize(
+    "speaking",
+    [
+        lambda voice: voice.agreed("Get it?"),
+        lambda voice: voice.follow(print),
+        lambda voice: voice.title("A"),
+    ],
+)
+def test_a_plain_voice_leaves_speaking_to_its_kinds(speaking):
+    with pytest.raises(NotImplementedError):
+        speaking(Voice())
 
 
 @pytest.mark.spec("MSG-3")

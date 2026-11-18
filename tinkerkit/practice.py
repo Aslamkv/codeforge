@@ -5,7 +5,9 @@ import subprocess
 import time
 from pathlib import Path
 
+from .build.project import Subsystem
 from .messages import say
+lazy from . import conversation
 lazy from .build.project import Project, Steps, ending, saved
 lazy from .conversation import (
     BUILD_STOP_GRACE_SECONDS,
@@ -13,6 +15,7 @@ lazy from .conversation import (
 )
 lazy from .jobs import Jobs, tinker_process
 lazy from .knowledge.library import Knowledge, Library, language_key
+lazy from .model.thinking import Thinking
 lazy from .prompts import Part, Prompts
 lazy from .ranking import Embeddings, Likeness
 lazy from .settings import (
@@ -22,6 +25,7 @@ lazy from .settings import (
     EXERCISE_FOLDER,
     REFLECTION_PROBLEMS,
     SAME_MEANING,
+    WORK_THINK,
     Home,
     projects_folder,
 )
@@ -500,3 +504,23 @@ def show():
         f"Practice projects are in {exercise_folder()}. Stop with: tinker stop #N; go on with: tinker resume #N "
         f"(tinker jobs lists them)"
     )
+
+
+class Practice(Subsystem):
+    COMMANDS = ("exercise",)
+
+    def handle(self, words, voice):
+        what = words[1]
+        if what.lower() == "status":
+            return show()
+        self.tracked(
+            voice,
+            f"Exercising {what}",
+            lambda tracker: (Thinking.for_work(what, tracker.phase, WORK_THINK),),
+            lambda tracker, model: exercised(what, tracker, model),
+        )
+
+
+def exercised(what, tracker, model):
+    conversation.attach(tracker)
+    return Exercise(model, tracker).run(what)
