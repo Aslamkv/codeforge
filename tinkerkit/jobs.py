@@ -15,6 +15,7 @@ lazy from .messages import say
 lazy from .settings import (
     DREAM_IDLE_SECONDS,
     EXERCISE_ENV,
+    HOME_ENV,
     JOB_START_TRIES,
     JOB_STOP_SIGNAL,
     Config,
@@ -195,6 +196,7 @@ class Follower:
     def __init__(self, number):
         self.number, self.output = number, f"output #{number}"
         self.seen = len(Home.store().entries(self.output))
+        self.exit = 0
 
     def follow(self, hosting):
         while True:
@@ -202,7 +204,7 @@ class Follower:
             ran_out = self.show()
             hosting = hosting or Runner.host()
             if self.number not in queue and ran_out and not (hosting and queue):
-                return
+                return max(self.exit, 0)
             time.sleep(QUEUE_LOOK_SECONDS)
 
     def show(self):
@@ -210,6 +212,8 @@ class Follower:
         for entry in entries[self.seen :]:
             if "line" in entry:
                 say.text(entry["line"])
+            if "exit" in entry:
+                self.exit = entry["exit"]
         self.seen = len(entries)
         return not entries or "exit" in entries[-1]
 
@@ -223,11 +227,15 @@ def tinker_command():
     return [sys.executable, str(Path(sys.argv[0]).resolve())]
 
 
+def tinker_environment(**extra):
+    return dict(os.environ, **{HOME_ENV: str(Home.root)}, **extra)
+
+
 def tinker_process(arguments, folder=None, output=None, **env):
     return subprocess.Popen(
         tinker_command() + arguments,
         cwd=folder,
-        env=dict(os.environ, PYTHONUNBUFFERED="1", **env),
+        env=tinker_environment(PYTHONUNBUFFERED="1", **env),
         text=True,
         stdin=subprocess.DEVNULL,
         stdout=output,
@@ -288,8 +296,7 @@ class Jobs:
             yield
             return
         if runner_job() is None:
-            cls.follow(argv)
-            raise SystemExit(0)
+            raise SystemExit(cls.follow(argv))
         cls.current = JOBS.get(runner_job())
         with cls.run_here(argv):
             yield
@@ -316,7 +323,7 @@ class Jobs:
         Queue.add_front(job["number"])
         hosting = Runner.host()
         try:
-            follower.follow(hosting)
+            return follower.follow(hosting)
         except KeyboardInterrupt:
             Runner.pause(hosting)
             raise

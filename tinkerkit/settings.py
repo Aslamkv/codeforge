@@ -100,6 +100,7 @@ SETTINGS = frozendict(
 )
 
 STATE_DIR = ".tinker"
+HOME_ENV = "TINKER_HOME"
 PROJECT_DB = "project.db"
 ENV_FILE, ENV_EXAMPLE = ".env", ".env.example"
 
@@ -331,8 +332,13 @@ class Page:
         return self.path.exists() and self.seen() != mark
 
 
+def home_root():
+    named = os.environ.get(HOME_ENV)
+    return Path(named) if named else Path(__file__).resolve().parent.parent / STATE_DIR
+
+
 class Home:
-    root = Path(__file__).resolve().parent.parent / STATE_DIR
+    root = home_root()
     stores = {}
 
     @classmethod

@@ -730,6 +730,51 @@ def test_teach_and_learn_ask_for_their_model_at_least_at_the_work_level(command,
     assert asked == [WORK_THINK]
 
 
+class FakeLearner:
+    built = []
+
+    def __init__(self, model, internet, embeddings, tracker):
+        FakeLearner.built.append((model, internet, embeddings, tracker))
+
+    @classmethod
+    def serving(cls, model, internet, embeddings, tracker):
+        return cls(model, internet, embeddings, tracker)
+
+    def run(self, topic):
+        return {"status": "done", "headline": f"Ended {topic}"}
+
+
+@pytest.mark.spec("CLI-6", "PRJ-15")
+@pytest.mark.parametrize(
+    "command, learner, title, nothing",
+    [
+        ("learn", "SlotLearner", "Learning Widgetlib", "Nothing learned about Widgetlib"),
+        ("research", "Researcher", "Researching Widgetlib", "Nothing found about Widgetlib"),
+    ],
+)
+def test_learn_and_research_end_with_their_learners_ending(command, learner, title, nothing, monkeypatch):
+    tracked = {}
+    monkeypatch.setattr(cli, learner, FakeLearner)
+    monkeypatch.setattr(FakeLearner, "built", [])
+    monkeypatch.setattr(
+        Commands,
+        "tracked",
+        lambda self, title, setup, work, blocked=None: tracked.update(
+            title=title, work=work, blocked=blocked
+        ),
+    )
+    Commands(parse(command, "Widgetlib")).run()
+    assert tracked["title"] == title
+    assert tracked["work"]("tracker", "model", "embeddings", "internet") == {
+        "status": "done",
+        "headline": "Ended Widgetlib",
+    }
+    assert FakeLearner.built == [("model", "internet", "embeddings", "tracker")]
+    stopped = RuntimeError("no pages")
+    assert tracked["blocked"](stopped) == Commands.blocked(nothing, stopped)
+    assert tracked["blocked"](stopped)["headline"] == nothing
+
+
 SPEC_REPLY = {
     "language": "Python",
     "criteria": [

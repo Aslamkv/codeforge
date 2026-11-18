@@ -274,6 +274,7 @@ class Workspace:
             TaughtCommands.prelude(command) + command,
             shell=True,
             cwd=self.root,
+            env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"},
             stdin=subprocess.DEVNULL,
             stdout=stdout,
             stderr=subprocess.STDOUT,

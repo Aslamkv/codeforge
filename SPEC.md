@@ -308,8 +308,10 @@ One SQLite database of documents and logs.
 
 The home and its database, the settings, numbered lists, and the one way to delete.
 
-- **SET-1** `Home.root` is the `.tinker` folder next to the `tinkerkit` package and `tinker.py`, where they
-  really are (symlinks resolved). `Home.store()` is the home database, `tinker.db`, in it.
+- **SET-1** `Home.root` is the folder named by the `TINKER_HOME` environment variable when it is set, else the
+  `.tinker` folder next to the `tinkerkit` package and `tinker.py`, where they really are (symlinks resolved).
+  `Home.store()` is the home database, `tinker.db`, in it. Every Tinker process that Tinker starts gets
+  `TINKER_HOME` set to its own `Home.root`, so it uses the same home.
 - **SET-2** `DEFAULT_CONFIG` is exactly: model `None`, ollama_url `http://localhost:11434`, keep_alive `"30m"`,
   max_growth `1.15`, test_timeout `60`, web_timeout `30`, learn_missing `2`,
   learn_cutoff `0.0`, learn_coverage `0.6`, learn_pages `8`, learn_min_pages `2`, learn_searches `3`,
@@ -471,7 +473,8 @@ goes to the front, so the person is always answered first.
 - **JOB-10** Whoever asked for a job follows it: a job command in a terminal (and the conversation's own
   `tinker ...` process) puts its job at the front, keeps its own pid on the job as `follower` (so
   `Jobs.of_process` finds the job by it too, and the conversation tracks the job's progress, ending and files),
-  prints log `output #N` as it grows and ends once its job leaves the queue; one that hosts the runner keeps it
+  prints log `output #N` as it grows and ends once its job leaves the queue, with the exit code its job's
+  process ended with when that is above 0 (bad arguments end with 2), else 0; one that hosts the runner keeps it
   until the queue is empty. Ctrl-C there, and quitting the conversation, pause the job that runs: it stays at the
   head and goes on when Tinker starts next, or at once if another live Tinker runs the queue. A glance
   (**CMD-1**) never enters the queue.
@@ -547,7 +550,9 @@ What is said in the chats, kept so that a chat is only a view of it.
 ## workspace (WS)
 
 - **WS-1** `Workspace.run(command)` runs one command in a POSIX shell in the project folder. Input comes from
-  `/dev/null`. stdout and stderr are merged, and the project folder's path is removed from the output. It
+  `/dev/null`, and `PYTHONDONTWRITEBYTECODE` is set, so a module rewritten at the same size within a second
+  never runs from a stale compiled copy. stdout and stderr are merged, and the project folder's path is
+  removed from the output. It
   gives `(exit code, output)`. A command that times out gives `(None, output)`, and its whole process group is
   killed. An unsafe command is never run: it gives `(None, REFUSED_OUTPUT)`.
 - **WS-2** These commands are unsafe: `sudo`; `rm -rf` of `/`, `~` or `..`; `mkfs`; `dd if=`; a download

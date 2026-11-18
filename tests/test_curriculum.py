@@ -850,3 +850,20 @@ def test_a_learn_that_serves_the_command_gives_its_own_end(tinker_home, monkeypa
     monkeypatch.setattr(slot_learner, "learn", lambda topic, deep=False: None)
     with pytest.raises(SystemExit, match="Nothing learned about Widgetlib; nothing saved."):
         slot_learner.run("Widgetlib")
+
+
+@pytest.mark.spec("PRJ-15")
+def test_a_learn_with_a_recap_ends_with_the_recap_rows(tinker_home, monkeypatch, capsys):
+    slot_learner = SlotLearner(tool_model(), FakeWeb(FOUND, ALL_PAGES), CountingEmbeddings())
+    entry = {"name": "Widgetlib", "summary": "a lib", "findings": ["a", "b"], "notes": []}
+    rows = [("📘", "Covers", "install, usage"), ("❓", "Open", "async support")]
+
+    def learning(topic, deep=False):
+        slot_learner.recap = rows
+        return entry
+
+    monkeypatch.setattr(slot_learner, "learn", learning)
+    assert slot_learner.run("Widgetlib")["details"] == [
+        ("Covers", "install, usage"),
+        ("Open", "async support"),
+    ]

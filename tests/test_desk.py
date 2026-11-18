@@ -10,6 +10,7 @@ import sys
 import textwrap
 import threading
 import time
+import types
 from pathlib import Path
 
 import pytest
@@ -62,6 +63,7 @@ from tinkerkit.memory.interview import UNREADABLE, Interview
 from tinkerkit.memory.memories import Questions as KeptQuestions
 from tinkerkit.memory.memories import Scratchpad
 from tinkerkit.messages import DIMMED, HEADING, Messages, Text, next_page_words
+from tinkerkit.messages import say as shared_say
 from tinkerkit.model.models import Cut, Models, QuickModel, ThinkLevels
 from tinkerkit.settings import EPISODE_GIST_CHARS, Config, Home
 from tinkerkit.shelf import Shelf
@@ -159,7 +161,7 @@ def test_console_keeps_the_plain_prompt_for_piped_input_inside_a_mode(monkeypatc
 @pytest.mark.spec("CNV-6")
 def test_the_banner_names_tinker_the_model_the_projects_folder_and_the_chats(monkeypatch):
     settings = {"model": "qwen3", "embed_model": "nomic-embed"}
-    monkeypatch.setattr(desk_module.Config, "get", lambda key: settings.get(key))
+    monkeypatch.setattr(Config, "get", lambda key: settings.get(key))
     root = Path.home() / "Projects"
     with_chats = Desk([ConsoleChannel(), Recorder("telegram")], root)
     assert with_chats.banner_lines() == [
@@ -182,7 +184,7 @@ def test_the_banner_names_tinker_the_model_the_projects_folder_and_the_chats(mon
 
 @pytest.mark.spec("CNV-6", "CHN-11")
 def test_the_terminal_banner_and_a_chat_banner_name_the_chats_only(desk, monkeypatch):
-    monkeypatch.setattr(desk_module.Config, "get", lambda key: None)
+    monkeypatch.setattr(Config, "get", lambda key: None)
     console, telegram, stateless, drawn = ConsoleChannel(), Recorder("Telegram"), Recorder("rec"), []
     telegram.state = "connecting…"
     monkeypatch.setattr(console, "banner", lambda lines: drawn.append(list(lines)))
@@ -755,7 +757,7 @@ def test_stopping_a_task_that_just_ended_stops_nothing(tmp_path, monkeypatch, en
     def group_gone(pid, sig):
         raise ended
 
-    monkeypatch.setattr(desk_module.os, "killpg", group_gone)
+    monkeypatch.setattr(os, "killpg", group_gone)
     assert desk.stop_task() is False
 
 
@@ -981,8 +983,8 @@ def test_the_chat_state_names_the_model_and_each_channel_with_whether_it_is_list
 
 def quiet_chat_state(desk, monkeypatch, running=(), plan="", entries=()):
     monkeypatch.setattr(desk, "running_now", lambda: list(running))
-    monkeypatch.setattr(Desk, "plan_shown", staticmethod(lambda waiting: plan))
-    monkeypatch.setattr(desk_module.Runs, "entries", staticmethod(lambda: list(entries)))
+    monkeypatch.setattr(desk, "waiting_plan", types.SimpleNamespace(shown=lambda: plan))
+    monkeypatch.setattr(Runs, "entries", staticmethod(lambda: list(entries)))
     monkeypatch.setattr(channels.Channels, "settings", lambda: {})
     Config.save(model="n")
     return ChatState(desk)
@@ -1765,7 +1767,7 @@ def test_the_terminal_reads_and_exits_at_once_while_periodic_work_waits(monkeypa
         assert waits.wait(timeout=5)
         yield from typed
 
-    monkeypatch.setattr(desk_module.say, "keys", exit_once_it_waits)
+    monkeypatch.setattr(shared_say, "keys", exit_once_it_waits)
     patched = {"collect": (console, waiting()), "status": (desk, waiting(status, passing=1))}
     owner, stand_in = patched.get(slow, (desk, waiting()))
     monkeypatch.setattr(owner, slow, stand_in)
@@ -2680,3 +2682,20 @@ def test_the_enabled_chats_come_from_the_chat_channels_module(monkeypatch):
     enabled = object()
     monkeypatch.setattr(channels.Channels, "enabled", staticmethod(lambda: enabled))
     assert desk_module.chat_channels() is enabled
+
+
+@pytest.mark.spec("SET-1")
+def test_a_direct_tinker_run_shares_the_home(tinker_home, monkeypatch):
+    ran = []
+    monkeypatch.setattr(
+        subprocess,
+        "run",
+        lambda command, **options: (
+            ran.append(options["env"]) or subprocess.CompletedProcess(command, 0, "", "")
+        ),
+    )
+    monkeypatch.delenv("TINKER_HOME")
+    Desk.run_tinker(types.SimpleNamespace(root=tinker_home), ["status"], 5)
+    desk_module.help_text()
+    assert [env["TINKER_HOME"] for env in ran] == [str(tinker_home)] * 2
+    assert all(env["NO_COLOR"] == "1" for env in ran)

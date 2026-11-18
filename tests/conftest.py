@@ -8,6 +8,8 @@ import time
 
 import pytest
 
+os.environ.pop("TINKER_HOME", None)
+
 import tinkerkit.cli  # noqa: F401
 from tinkerkit import desk, jobs, logger
 from tinkerkit.build.project import Project
@@ -92,6 +94,7 @@ def clock(monkeypatch):
 def tinker_home(tmp_path, monkeypatch):
     home = tmp_path / "tinker-home" / ".tinker"
     monkeypatch.setattr(Home, "root", home)
+    monkeypatch.setenv("TINKER_HOME", str(home))
     return home
 
 

@@ -25,6 +25,14 @@ def test_home_is_dot_tinker_next_to_the_real_script(tinker_home):
     assert Home.root == tinker_home and Home.store().path == tinker_home / "tinker.db"
 
 
+@pytest.mark.spec("SET-1")
+def test_home_follows_tinker_home_when_it_is_set(tmp_path, monkeypatch):
+    monkeypatch.setenv("TINKER_HOME", str(tmp_path / "elsewhere"))
+    assert settings.home_root() == tmp_path / "elsewhere"
+    monkeypatch.delenv("TINKER_HOME")
+    assert settings.home_root() == Path(settings.__file__).resolve().parent.parent / ".tinker"
+
+
 @pytest.mark.spec("SET-2")
 def test_default_config():
     assert settings.DEFAULT_CONFIG == {

@@ -767,7 +767,7 @@ def finished_head():
 
 class Started:
     def __init__(self, started, lines, during=finished_head):
-        self.started, self.lines, self.during, self.folders = started, lines, during, []
+        self.started, self.lines, self.during, self.folders, self.code = started, lines, during, [], 0
 
     def __call__(self, command, **options):
         if command[:2] != jobs.tinker_command():
@@ -779,7 +779,7 @@ class Started:
 
     def wait(self):
         self.during()
-        return 0
+        return self.code
 
 
 @pytest.mark.spec("JOB-9")
@@ -1040,6 +1040,35 @@ def test_a_job_command_hosting_the_runner_follows_its_job_then_the_queue(
 
 
 @pytest.mark.spec("JOB-10")
+@pytest.mark.parametrize(("code", "ended_with"), [(2, 2), (0, 0), (-15, 0)])
+def test_a_job_command_ends_with_its_jobs_exit_code_when_above_0(
+    home_store, runner, monkeypatch, tmp_path, code, ended_with
+):
+    runner.code = code
+    monkeypatch.setattr(
+        Runner, "host", classmethod(lambda cls: threading.Thread(target=Runner.go_through).start() or True)
+    )
+    monkeypatch.chdir(tmp_path)
+    with pytest.raises(SystemExit) as ended, Jobs.running(["learn", "rust"]):
+        raise AssertionError("a job command runs no job itself")
+    assert ended.value.code == ended_with
+
+
+@pytest.mark.spec("JOB-10")
+@pytest.mark.parametrize(("code", "ended_with"), [(2, 2), (0, 0), (-15, 0)])
+def test_a_follower_returns_its_jobs_exit_code_when_above_0(
+    home_store, runner, monkeypatch, code, ended_with
+):
+    runner.code = code
+    monkeypatch.setattr(Runner, "host", classmethod(lambda cls: False))
+    put_job(home_store, 1, state="queued", pid=None)
+    add_back(1)
+    follower = jobs.Follower(1)
+    Runner.run_job(1)
+    assert follower.follow(hosting=False) == ended_with
+
+
+@pytest.mark.spec("JOB-10")
 def test_the_job_a_process_follows_is_found_by_that_process(home_store, runner, monkeypatch, tmp_path):
     monkeypatch.setattr(
         Runner, "host", classmethod(lambda cls: threading.Thread(target=Runner.go_through).start() or True)
@@ -1096,3 +1125,12 @@ def test_pausing_signals_the_live_head_and_stops_the_runner_only_where_it_is_hos
     add_back(2)
     Runner.pause(hosting)
     assert told == [1] and Runner.paused is hosting and Queue.ordered() == [1, 2]
+
+
+@pytest.mark.spec("SET-1")
+def test_a_started_tinker_process_shares_the_home(tinker_home, monkeypatch):
+    started = []
+    monkeypatch.setattr("subprocess.Popen", lambda command, **options: started.append(options["env"]))
+    monkeypatch.delenv("TINKER_HOME")
+    jobs.tinker_process(["status"])
+    assert started[0]["TINKER_HOME"] == str(tinker_home) and started[0]["PYTHONUNBUFFERED"] == "1"

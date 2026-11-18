@@ -42,6 +42,13 @@ def test_run_removes_the_project_path_and_has_no_input(workspace, project_dir):
 
 
 @pytest.mark.spec("WS-1")
+def test_run_never_writes_bytecode(workspace, monkeypatch):
+    monkeypatch.delenv("PYTHONDONTWRITEBYTECODE", raising=False)
+    code, output = workspace.run('echo "$PYTHONDONTWRITEBYTECODE"', quiet=True)
+    assert code == 0 and output.strip() == "1"
+
+
+@pytest.mark.spec("WS-1")
 def test_run_times_out_and_kills_the_process_group(workspace, project_dir):
     code, output = workspace.run("(sleep 0.2; touch late) & sleep 30", timeout=0.05, quiet=True)
     assert code is None

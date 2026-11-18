@@ -65,6 +65,7 @@ from .jobs import (
     queue_lines,
     stop_answers,
     tinker_command,
+    tinker_environment,
     tinker_process,
 )
 from .memory.memories import Memories, Scratchpad
@@ -1200,10 +1201,6 @@ class Desk:
             return None
         return said
 
-    @staticmethod
-    def plan_shown(waiting):
-        return waiting.shown()
-
     def on_board(self, audience, waiting, text):
         board = self.messages_by_run.setdefault(waiting.run, {})
         for channel, chat in audience:
@@ -1547,7 +1544,7 @@ class Desk:
             text=True,
             capture_output=True,
             stdin=subprocess.DEVNULL,
-            env=dict(os.environ, NO_COLOR="1", **(env or {})),
+            env=tinker_environment(NO_COLOR="1", **(env or {})),
             timeout=timeout,
         )
 
@@ -1591,7 +1588,7 @@ class ChatState:
         return "Running now:\n" + "\n\n".join(run["text"] for run in running) if running else ""
 
     def waiting(self):
-        plan = Desk.plan_shown(self.desk.waiting_plan)
+        plan = self.desk.waiting_plan.shown()
         return (
             f"A spec waits for the person (confirm builds it, amend WHAT changes it):\n{plan}" if plan else ""
         )
@@ -2008,7 +2005,7 @@ def help_text(words=()):
             capture_output=True,
             timeout=30,
             stdin=subprocess.DEVNULL,
-            env=dict(os.environ, NO_COLOR="1", TINKER_FORMAT="markup"),
+            env=tinker_environment(NO_COLOR="1", TINKER_FORMAT="markup"),
         )
     except OSError, subprocess.SubprocessError:
         return "❓ `/help` lists what you can send"
