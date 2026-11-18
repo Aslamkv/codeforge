@@ -1,5 +1,6 @@
 import re
 from collections import namedtuple
+from collections.abc import MutableMapping, MutableSequence
 lazy import os
 lazy import secrets
 lazy import shutil
@@ -86,7 +87,7 @@ class RunChecks:
     @staticmethod
     def check_phases(project):
         for cycle in project.cycles:
-            phases = FIX_PHASES if cycle.get("kind") == "fix" else PHASES
+            phases = cycle.phases
             if cycle.get("phase") not in phases:
                 raise SystemExit(
                     f"The saved phase '{cycle.get('phase')}' of cycle {cycle.get('id')} is not one of its "
@@ -293,6 +294,119 @@ class Runs:
         return f"[+{len(features)} feature{'s' if len(features) > 1 else ''}] " + task if features else task
 
 
+class Cycle(MutableMapping):
+    def __init__(self, fields):
+        self.fields = fields
+
+    @staticmethod
+    def of(fields):
+        return (FixCycle if fields.get("kind") == "fix" else FeatureCycle)(fields)
+
+    def __getitem__(self, key):
+        return self.fields[key]
+
+    def __setitem__(self, key, value):
+        self.fields[key] = value
+
+    def __delitem__(self, key):
+        del self.fields[key]
+
+    def __iter__(self):
+        return iter(self.fields)
+
+    def __len__(self):
+        return len(self.fields)
+
+    def __repr__(self):
+        return f"{type(self).__name__}({self.fields!r})"
+
+    @property
+    def id(self):
+        return self.fields["id"]
+
+    @property
+    def request(self):
+        return self.fields["request"]
+
+    @property
+    def phase(self):
+        return self.fields.get("phase")
+
+    @property
+    def awaiting(self):
+        return self.fields.get("awaiting")
+
+    @property
+    def confirm(self):
+        return self.fields.get("confirm")
+
+    @property
+    def confirmed(self):
+        return self.fields.get("confirmed")
+
+    @property
+    def files(self):
+        return self.fields.get("files", [])
+
+    @property
+    def code_done(self):
+        return self.fields.get("code_done")
+
+    @property
+    def used(self):
+        return self.fields.get("used", {})
+
+    @property
+    def chat(self):
+        return self.fields.get("chat", "cli")
+
+
+class FeatureCycle(Cycle):
+    @property
+    def phases(self):
+        return PHASES
+
+
+class FixCycle(Cycle):
+    @property
+    def phases(self):
+        return FIX_PHASES
+
+
+class Cycles(MutableSequence):
+    def __init__(self, stored, known):
+        self.stored, self.known = stored, known
+
+    def __getitem__(self, index):
+        if isinstance(index, slice):
+            return [self.wrapped(fields) for fields in self.stored[index]]
+        return self.wrapped(self.stored[index])
+
+    def __setitem__(self, index, cycle):
+        self.stored[index] = self.fields_of(cycle)
+
+    def __delitem__(self, index):
+        del self.stored[index]
+
+    def __len__(self):
+        return len(self.stored)
+
+    def insert(self, index, cycle):
+        self.stored.insert(index, self.fields_of(cycle))
+
+    def wrapped(self, fields):
+        known = self.known.get(id(fields))
+        if known is None:
+            known = self.known[id(fields)] = Cycle.of(fields)
+        return known
+
+    def fields_of(self, cycle):
+        if isinstance(cycle, Cycle):
+            self.known[id(cycle.fields)] = cycle
+            return cycle.fields
+        return cycle
+
+
 class Project:
     DEPENDENCY_FILES = {
         "requirements.txt",
@@ -314,6 +428,7 @@ class Project:
         self.workdir, self.run, self.spec = workdir, run, spec
         self.state = workdir / STATE_DIR
         self.store = project_store(workdir)
+        self.known_cycles = {}
 
     @classmethod
     def load(cls, workdir, run=None):
@@ -333,26 +448,29 @@ class Project:
 
     @property
     def cycles(self):
-        return self.spec.setdefault("cycles", [])
+        return Cycles(self.spec.setdefault("cycles", []), self.known_cycles)
 
     def open_cycle(self):
-        return next((cycle for cycle in self.cycles if cycle.get("phase") != "done"), None)
+        return next((cycle for cycle in self.cycles if cycle.phase != "done"), None)
 
     def new_cycle(self, cycle_id, request, brief="", kind="feature"):
-        cycle = {
-            "id": cycle_id,
-            "request": request,
-            "brief": brief,
-            "kind": kind,
-            "phase": FIX_PHASES[0] if kind == "fix" else PHASES[0],
-            "created": now_text(),
-        }
+        cycle = Cycle.of(
+            {
+                "id": cycle_id,
+                "request": request,
+                "brief": brief,
+                "kind": kind,
+                "phase": None,
+                "created": now_text(),
+            }
+        )
+        cycle["phase"] = cycle.phases[0]
         self.cycles.append(cycle)
         self.save()
         return cycle
 
     def cycle(self, cycle_id):
-        return next((cycle for cycle in self.cycles if cycle["id"] == cycle_id), None)
+        return next((cycle for cycle in self.cycles if cycle.id == cycle_id), None)
 
     def cycle_criteria(self, cycle):
         return [criterion for criterion in self.criteria if criterion.get("cycle") == cycle["id"]]

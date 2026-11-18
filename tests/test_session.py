@@ -187,3 +187,12 @@ def test_save_keeps_the_project_and_tells_the_tracker(make_project, make_session
     session = make_session(make_project([criterion("C1", "t.py::a", status="green")]), tracker=tracker)
     session.save()
     assert plan_of(project_dir)["steps"][0]["id"] == "C1" and tracker.state["passing"] == [1, 1]
+
+
+@pytest.mark.spec("SES-5")
+def test_a_phase_shows_nothing_of_itself_by_default(session, capsys):
+    phase = Phase(session)
+    cycle = session.project.cycles[0]
+    assert (phase.NAME, phase.confirms, phase.title(cycle), phase.outcome(cycle)) == ("", False, "", "")
+    phase.after(cycle)
+    assert capsys.readouterr().out == ""

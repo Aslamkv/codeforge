@@ -14,6 +14,7 @@ from tinkerkit.build.plan import (
     asked,
     groups_fitting,
 )
+from tinkerkit.build.project import Cycle
 from tinkerkit.knowledge.library import Knowledge, Library
 from tinkerkit.knowledge.principles import Principle, Principles
 from tinkerkit.prompts import Reply
@@ -741,3 +742,33 @@ def test_a_settings_file_is_planned_only_for_a_spec_point_about_a_setting(planne
     criteria = json.loads(spec_reply())["criteria"][:2] + [setting]
     plan = SpecWriter(session).read_spec(Reply(spec_reply(files=files, criteria=criteria)), cycle)
     assert ".env.example" in [file["path"] for file in plan["files"]]
+
+
+@pytest.mark.spec("SES-5")
+def test_the_plan_phases_say_what_the_cycle_shows_of_them(planner, fake_ollama):
+    session, project, cycle = planner
+    write_spec(session, cycle, fake_ollama)
+    phases = [Recaller(session), SpecWriter(session), Designer(session), InterfaceReviewer(session)]
+    assert [phase.NAME for phase in phases] == ["recall", "spec", "design", "review"]
+    assert [phase.confirms for phase in phases] == [False, False, False, True]
+    assert [phase.title(cycle) for phase in phases] == [
+        Recaller.TITLE,
+        "Plan: the spec (project)",
+        Designer.TITLE,
+        InterfaceReviewer.TITLE,
+    ]
+    assert (
+        SpecWriter(session).title(Cycle.of({"id": "F2", "request": REQUEST})) == "Plan: the spec (feature F2)"
+    )
+    assert [phase.outcome(cycle) for phase in phases] == ["", "2 point(s) to test", "3 file(s)", ""]
+
+
+@pytest.mark.spec("SES-5")
+def test_the_review_shows_the_plan_after_it(planner, fake_ollama, capsys):
+    session, project, cycle = planner
+    write_spec(session, cycle, fake_ollama)
+    capsys.readouterr()
+    InterfaceReviewer(session).after(cycle)
+    shown = capsys.readouterr().out
+    assert "Plan: 2 spec criteria (see SPEC.md)" in shown
+    assert "C1    [to do] effort 1 " in shown and "-> tests/test_calc.py::test_add" in shown

@@ -67,7 +67,6 @@ def test_phase_lists():
         "done",
     )
     assert settings.FIX_PHASES == ("recall", "reproduce", "verify", "final_review", "lessons", "done")
-    assert settings.CONFIRM_AFTER == {"feature": "review", "fix": "reproduce"}
 
 
 @pytest.mark.spec("SET-4")

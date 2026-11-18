@@ -80,7 +80,7 @@ with a dot, and each imports only the modules listed above it:
 | `model.quality` | calibration's quality tasks and how a reply is scored against them (`tasks`, `tiers`, `solves`) |
 | `model.models` | the local model: Ollama's API, one request with its budgets and retries (`Model`), measuring a model (`Calibrator`), measured models (`Models`) |
 | `model.thinking` | each request's one thinking level (`RequestReview`, `RequestWords`) |
-| `build.project` | the plan and its record (`Project`, `SpecDocument`, `Runs`, `RunChecks`, `Brief`, `Outcome`), the run's `Tracker` and its `ending`, and the step pipeline (`Steps`) with what moves a tracker through it (`Tracked`) |
+| `build.project` | the plan and its record (`Project`, `Cycle`, `SpecDocument`, `Runs`, `RunChecks`, `Brief`, `Outcome`), the run's `Tracker` and its `ending`, and the step pipeline (`Steps`) with what moves a tracker through it (`Tracked`) |
 | `web.fetcher` | the web plugin's page fetcher, used by `web.internet` alone: pages read straight from their sites, in parallel, with the standard library only (`Fetcher`, `Fetched`) |
 | `web.search` | the search engines the web plugin asks, used by `web.internet` alone: open engines with no key, with the standard library only (`SearchEngine`, `Mwmbl`, `MediaWiki`, `Wikipedia`, `Wikibooks`) |
 | `web.passages` | every page read as text: an HTML page's main content as blocks, and fetched pages as passages under headings, repeats dropped (`Cleaner`, `MainBlocks`, `Page`, `Passage`) |
@@ -106,8 +106,9 @@ with a dot, and each imports only the modules listed above it:
 | `build.plan` | recall, the spec, the contracts where files meet, and their review |
 | `build.code` | setup, the tests, the code, and fixing until every test passes |
 | `build.finish` | tidy, the README, the final review and the lessons |
+| `build.cycle` | the cycle of phases: which phase class does each phase, and running them in order (`CycleRunner`, `PHASE_CLASSES`) |
 | `logger` | the trace of what Tinker does, wrapped around chosen methods from outside, so no other module knows it (`install`, `uninstall`, `WATCHED`, `TraceLog`) |
-| `cli` | the main system: the command line (`Cli`, `Commands`, `Doctor`), one run (`ProjectRun`, `ProjectFolder`) and the cycle of phases (`CycleRunner`) |
+| `cli` | the main system: the command line (`Cli`, `Commands`, `Doctor`), one run (`ProjectRun`, `ProjectFolder`) |
 
 - **ARCH-1** Each `tinkerkit` module imports only the modules listed above it in the table. The one exception
   is `conversation`, which imports the `chat.channels` plugin lazily, inside a function.
@@ -309,7 +310,6 @@ The home and its database, the settings, numbered lists, and the one way to dele
   fetch_max_bytes are the `Fetcher`'s workers, timeout and max_bytes; embed_model is the embedding model
   `tinker model NAME` selects.
 - **SET-3** `PHASES` and `FIX_PHASES` are the phase lists given in [The cycle](#the-cycle).
-  `CONFIRM_AFTER` is `review` for the project and a feature, and `reproduce` for a bug fix.
 - **SET-4** `Config` is `DEFAULT_CONFIG` overridden by the home's `config`. It is read from the database each
   time, so a change another Tinker made is seen at once; a stored key no setting has is ignored.
   `Config.save(**changes)` keeps the changes. `Config.keep_alive(value)` gives whole seconds as an `int` and a
@@ -856,7 +856,9 @@ Each request's one thinking level.
   text before anything is deleted.
 - **PRJ-8** `Project` keeps `criteria` (saved as `steps`), `cycles` and `files` in the project's database.
   `Project.load(folder)` reads them back. `open_cycle()` is the first cycle not done. `new_cycle` starts at the
-  first phase of its kind. `new_criterion` numbers the criteria `C1, C2 …` (`B…` for a bug) from one counter.
+  first phase of its kind. A cycle is a `Cycle` over its saved fields, so a change to it is what is saved:
+  `FeatureCycle` (the project or a feature) or `FixCycle` (a bug fix), chosen by its kind in `Cycle.of`, and
+  its `phases` are `PHASES` or `FIX_PHASES`. `new_criterion` numbers the criteria `C1, C2 …` (`B…` for a bug) from one counter.
   `cycle(id)` and `criterion(id)` give the one with that id, or `None`. `counts()` gives
   `(passing, parked, total)`. `test_names(file)` gives the names of a test file's tests, and
   `criterion_of_test(test)` the text of that test's criterion, or `""`. `save()` keeps the plan and writes
@@ -890,7 +892,7 @@ Each request's one thinking level.
   is an error. `run(at, step, save, waits)` goes on from `at`, the step reached: it enters each step, runs it
   (`step(name)`), and saves the next one (`save(next)`), until the end (`done`). A step whose `only_if` says no
   is passed over, neither entered nor run. A step that gives False stops there, unsaved (`blocked`), and
-  `waits()` stops it before the next step (`waiting`). The cycle's phases (**CLI-10**) and a practice project's
+  `waits()` stops it before the next step (`waiting`). The cycle's phases (**CYC-1**) and a practice project's
   steps (**EXR-4**) run this way. Learning (**LRN-7**) and reading (**RDG-14**) only enter their steps: a
   learn goes on through its journal, and a reading by its chapters' states. Both share `Tracked`: its
   `step(phase, said)` says the words and enters the step, and its `outcome(text)` gives the tracker what came of
@@ -2083,6 +2085,11 @@ It is a job like any other, so the person always comes first.
 - **SES-4** `Session.knowledge` is for the project's language. Before the spec names it, it is for the
   language the request names (`Knowledge.named_in`: the first it names of the languages Tinker knows), and
   Python only when it names none.
+- **SES-5** A `Phase` says for itself what the cycle shows of it: its `NAME` (the phase it does), its
+  `title(cycle)` (the spec phase adds `project` or `feature ID`), its `outcome(cycle)` once done (the points to
+  test, the files, the tests and files written, the spec points passing; empty for the others), its
+  `after(cycle)` (verify formats the code, review shows the plan) and whether the cycle waits for confirmation
+  after it (`confirms`: review and reproduce).
 
 ## build.plan (PLN)
 
@@ -2206,6 +2213,18 @@ Tidy, the README, the final review and the lessons.
   (**KNW-4**), giving the project's files and folder as the names a lesson must not have, and clears the noted
   problems.
 
+## build.cycle (CYC)
+
+- **CYC-1** `CycleRunner.run` runs the phases of the cycle's kind from the saved one, in order, saving after
+  each, each by its phase class (`PHASE_CLASSES`, one per name in `PHASES` and `FIX_PHASES`), and runs a done
+  phase's `after` (**SES-5**). A run with `--web` that is past recall recalls first. It gives `blocked` when a
+  phase stops, and then disproves the knowledge used in that step. A phase that stops for a reason gives it as
+  its result, `Stopped(kind, reason)`: the tools do not work (`tools`), the project does not build (`build`),
+  the bug was not reproduced (`unreproduced`) or the final review failed (`review`). The runner keeps it, and
+  the run's end says why from it. A phase that stops with parked criteria gives False. It gives `awaiting`
+  after a phase that `confirms` when the cycle waits for confirmation (**CLI-8**), and `done` otherwise. Each
+  phase done says its `outcome` to the tracker.
+
 ## logger (LOG)
 
 The trace of what Tinker does, for performance work and spec corrections. It wraps chosen methods from outside;
@@ -2292,20 +2311,11 @@ The main system: the command line, one run, and the cycle of phases.
 - **CLI-9** `tinker task` builds straight through ([The cycle](#the-cycle)). Given `--confirm`, it prints the
   plan to confirm and ends `awaiting` (**CLI-8**, **PRJ-13**). A run that stops (`blocked`) says why and how
   to go on.
-- **CLI-10** `CycleRunner.run` runs the phases from the saved one, in order, saving after each, and formats
-  after verify. A run with `--web` that is past recall recalls first. It gives `blocked` when a phase stops,
-  and then disproves the knowledge used in that step. A phase that stops for a reason gives it as its result,
-  `Stopped(kind, reason)`: the tools do not work (`tools`), the project does not build (`build`), the bug was
-  not reproduced (`unreproduced`) or the final review failed (`review`). The runner keeps it, and the run's
-  end says why from it. A phase that stops with parked criteria gives False. It gives `awaiting` after the
-  phase its kind confirms after (`CONFIRM_AFTER`) when the cycle waits for confirmation (**CLI-8**), and
-  `done` otherwise. Every phase has a phase class, and each phase done says what came of it (`outcome`: the
-  points to test, the files, the tests and files written, the spec points passing).
-- **CLI-11** `main()` ends a run cleanly: Ctrl-C ends with `Interrupted.`, and Ollama and file errors end with their
+- **CLI-10** `main()` ends a run cleanly: Ctrl-C ends with `Interrupted.`, and Ollama and file errors end with their
   message, never a traceback. A closed terminal and `SIGTERM` end it as Ctrl-C does. However it ends, it unloads no
   model: a model stays loaded until its `keep_alive` idle time is up. A chat, however it ends, unloads the model in use
   and the embedding model, so none of its jobs' models stays in memory after it.
-- **CLI-12** Built end to end: `tinker task` with a model that answers like a real one builds a project in its
+- **CLI-11** Built end to end: `tinker task` with a model that answers like a real one builds a project in its
   folder. Each spec point gets a test, the code passes them (a wrong first version is fixed by the verify
   loop), the README's examples run, the final review passes, lessons are kept, SPEC.md is written, the run is
   pointed to from the home and the exit code is 0.

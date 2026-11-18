@@ -118,8 +118,6 @@ PHASES = (
     "done",
 )
 FIX_PHASES = ("recall", "reproduce", "verify", "final_review", "lessons", "done")
-CONFIRM_AFTER = frozendict({"feature": "review", "fix": "reproduce"})
-FORMATTER_RUNS_AFTER = ("verify",)
 STATUS_TEXT = frozendict({"green": "passes", "todo": "to do", "active": "in progress", "blocked": "parked"})
 KINDS = ("code", "test", "template", "config", "docs")
 MAX_FILE_LINES = 60

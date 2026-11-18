@@ -31,6 +31,7 @@ SetupOutcome = namedtuple("SetupOutcome", "stage output")
 
 
 class TestToolSetup(Phase, NotAPytestClass):
+    NAME = "setup"
     TITLE = "Setup (the test tool, before any test is written)"
 
     def run(self, cycle):
@@ -47,7 +48,13 @@ class TestToolSetup(Phase, NotAPytestClass):
 
 
 class TestWriter(Phase, NotAPytestClass):
+    NAME = "tests"
     TITLE = "Spec tests (one for every spec point, before any code)"
+
+    def outcome(self, cycle):
+        criteria = self.project.cycle_criteria(cycle)
+        present = sum(TestRef(criterion["test"]).present(self.workspace) for criterion in criteria)
+        return f"{present}/{len(criteria)} test(s) written"
 
     def run(self, cycle, only=None):
         steps = [
@@ -224,7 +231,11 @@ class TestWriter(Phase, NotAPytestClass):
 
 
 class CodeWriter(Phase):
+    NAME = "code"
     TITLE = "Code (just enough to pass the tests)"
+
+    def outcome(self, cycle):
+        return f"{len(cycle.code_done or [])} file(s) written"
 
     def run(self, cycle):
         self.write_all(cycle)
@@ -515,8 +526,16 @@ class CodeWriter(Phase):
 
 
 class Verifier(Phase):
+    NAME = "verify"
     TITLE = "Verify (until every test passes)"
     RANK = {"missing": -1, "build": 0, "fails": 1, "passes": 2}
+
+    def outcome(self, cycle):
+        green, _, total = self.project.counts()
+        return f"{green}/{total} spec points pass"
+
+    def after(self, cycle):
+        self.session.format_code()
 
     RESTORE_POINT = "verify"
     FLAKY_RERUNS = 3
@@ -1094,7 +1113,9 @@ class BuildFix(Worker):
 
 
 class BugReproducer(Phase):
+    NAME = "reproduce"
     TITLE = "Reproduce the bug (a test that fails now)"
+    confirms = True
 
     def run(self, cycle):
         Designer(self.session).ensure_toolchain()

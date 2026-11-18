@@ -9,10 +9,12 @@ from tinkerkit.build.code import (
     CodeWriter,
     FixAttempt,
     TestTool,
+    TestToolSetup,
     TestWriter,
     ToolchainRepair,
     Verifier,
 )
+from tinkerkit.build.project import Cycle
 from tinkerkit.prompts import Reply
 from tinkerkit.settings import TESTS_LOCKED_REASON
 from tinkerkit.workspace import Output, TestRef
@@ -39,6 +41,41 @@ def calc(make_project, make_session, project_dir):
 
 def steps_of(project):
     return {criterion["id"]: criterion for criterion in project.criteria}
+
+
+@pytest.mark.spec("SES-5")
+def test_the_code_phases_say_what_the_cycle_shows_of_them(calc):
+    session, project = calc
+    cycle = project.cycles[0]
+    phases = [
+        TestToolSetup(session),
+        TestWriter(session),
+        CodeWriter(session),
+        Verifier(session),
+        BugReproducer(session),
+    ]
+    assert [phase.NAME for phase in phases] == ["setup", "tests", "code", "verify", "reproduce"]
+    assert [phase.confirms for phase in phases] == [False, False, False, False, True]
+    assert [phase.outcome(cycle) for phase in phases] == [
+        "",
+        "2/2 test(s) written",
+        "0 file(s) written",
+        "0/2 spec points pass",
+        "",
+    ]
+    assert (
+        CodeWriter(session).outcome(Cycle.of({"id": "base", "code_done": ["calc.py"]})) == "1 file(s) written"
+    )
+
+
+@pytest.mark.spec("SES-5")
+def test_verify_formats_the_code_after_it(calc, monkeypatch):
+    session, project = calc
+    formatted = []
+    monkeypatch.setattr(session, "format_code", lambda: formatted.append(True))
+    Verifier(session).after(project.cycles[0])
+    CodeWriter(session).after(project.cycles[0])
+    assert formatted == [True]
 
 
 @pytest.mark.spec("BLD-1")

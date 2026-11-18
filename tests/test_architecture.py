@@ -54,6 +54,7 @@ LAYERS = (
     "build.plan",
     "build.code",
     "build.finish",
+    "build.cycle",
     "cli",
 )
 

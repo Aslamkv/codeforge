@@ -1,5 +1,6 @@
 import argparse
 import io
+import json
 import os
 import re
 import shutil
@@ -11,6 +12,9 @@ from conftest import criterion, plan_of, record_of
 
 from tinkerkit.build.project import (
     Brief,
+    Cycle,
+    FeatureCycle,
+    FixCycle,
     Outcome,
     Project,
     RunChecks,
@@ -26,7 +30,7 @@ from tinkerkit.build.project import (
 from tinkerkit.jobs import Jobs
 from tinkerkit.messages import Message, say
 from tinkerkit.prompts import Part
-from tinkerkit.settings import EXERCISE_ENV, Home
+from tinkerkit.settings import EXERCISE_ENV, FIX_PHASES, PHASES, Home
 from tinkerkit.store import Log
 from tinkerkit.workspace import TaughtCommands, Workspace
 
@@ -249,6 +253,45 @@ def test_project_cycles_and_criteria(make_project, project_dir):
     assert Project.load(project_dir, project.run).criteria[0]["id"] == "C1"
     assert (project_dir / "SPEC.md").read_text().startswith("# Spec: a calculator")
     assert sorted(path.name for path in project_dir.iterdir()) == [".tinker", "SPEC.md"]
+
+
+@pytest.mark.spec("PRJ-8")
+def test_cycles_are_kinds_over_their_saved_fields(make_project, project_dir):
+    project = make_project(cycles=[])
+    base = project.new_cycle("base", "a calculator")
+    fix = project.new_cycle("f1", "a bug", kind="fix")
+    assert isinstance(base, FeatureCycle) and isinstance(fix, FixCycle)
+    assert (base.phases, fix.phases) == (PHASES, FIX_PHASES)
+    assert (base.id, base.request, base.phase) == ("base", "a calculator", "recall")
+    assert (base.awaiting, base.confirm, base.confirmed, base.code_done) == (None, None, None, None)
+    assert (base.files, base.used, base.chat) == ([], {}, "cli")
+    base["files"] = ["calc.py"]
+    base.setdefault("data", "1 + 2")
+    assert "data" in base and base.files == ["calc.py"] and dict(base)["data"] == "1 + 2"
+    assert project.spec["cycles"][0]["files"] == ["calc.py"] and type(project.spec["cycles"][0]) is dict
+    assert project.cycles[0] is base and project.cycles[:1] == [base] and len(project.cycles) == 2
+    project.cycles[0] = dict(base, phase="done")
+    assert project.spec["cycles"][0]["phase"] == "done" and project.open_cycle() is fix
+    assert Cycle.of({"kind": "fix"}).phases == FIX_PHASES and Cycle.of({}).phases == PHASES
+
+
+@pytest.mark.spec("PRJ-8")
+def test_saved_cycles_keep_their_bytes(make_project, project_dir):
+    project = make_project(cycles=[])
+    project.new_cycle("base", "a calculator", "brief")
+    assert list(plan_of(project_dir)["cycles"][0]) == ["id", "request", "brief", "kind", "phase", "created"]
+    assert json.dumps(project.spec["cycles"]) == json.dumps(
+        Project.load(project_dir, project.run).spec["cycles"]
+    )
+
+
+@pytest.mark.spec("PRJ-8")
+def test_check_phases_uses_each_cycles_own_phases(make_project, project_dir):
+    project = make_project(cycles=[])
+    project.new_cycle("f1", "a bug", kind="fix")
+    project.cycles[0]["phase"] = "spec"
+    with pytest.raises(SystemExit, match="is not one of its phases"):
+        RunChecks.check_phases(project)
 
 
 FILES = {

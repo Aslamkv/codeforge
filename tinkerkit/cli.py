@@ -28,27 +28,24 @@ from .jobs import (
 )
 from .memory import dream, memories
 from .memory.interview import Interview
-from .memory.memories import Scratchpad
 from .messages import Messages, human_duration, next_page_line, paint, say
 from .shelf import Reader, Shelf
 from .skills import SkillLearner
 from .system import SYSTEM_CHECKS, SYSTEM_WORDS
-lazy from .build.code import BugReproducer, CodeWriter, TestToolSetup, TestWriter, Verifier
-lazy from .build.finish import FinalReview, LessonWriter, ReadmeWriter, Tidy
-lazy from .build.plan import Designer, InterfaceReviewer, Recaller, SpecWriter
+lazy from .build.cycle import CycleRunner
+lazy from .build.plan import InterfaceReviewer, SpecWriter
 lazy from .build.project import (
     Brief,
     Outcome,
     Project,
     RunChecks,
     Runs,
-    Steps,
     Tracker,
     ending,
     project_store,
     saved,
 )
-lazy from .build.session import Session, Stopped
+lazy from .build.session import Session
 lazy from .knowledge.curriculum import LearnStopped, SlotLearner
 lazy from .knowledge.graph import Graph, MemoryBrowser, write_page
 lazy from .knowledge.library import Library, Researcher, ResearchLearner, search_entry
@@ -58,14 +55,10 @@ lazy from .model.thinking import RequestReview
 lazy from .prompts import Prompts
 lazy from .ranking import Embeddings, Retriever
 lazy from .settings import (
-    CONFIRM_AFTER,
     DEFAULT_MAX_STALL,
     ENV_EXAMPLE,
     ENV_FILE,
-    FIX_PHASES,
-    FORMATTER_RUNS_AFTER,
     NUMBERED_PARTS,
-    PHASES,
     STATUS_TEXT,
     WORK_THINK,
     Config,
@@ -76,7 +69,7 @@ lazy from .settings import (
 lazy from .store import Log
 lazy from .text import clock, first_line, now_text
 lazy from .web.internet import Internet
-lazy from .workspace import TaughtCommands, TestRef
+lazy from .workspace import TaughtCommands
 
 try:
     from .chat import channels
@@ -1442,7 +1435,7 @@ class ProjectRun:
             self.confirm_or_amend(cycle)
         runner = CycleRunner(session)
         if cycle is None:
-            runner.show_plan()
+            InterfaceReviewer(session).show_plan()
             say.done(
                 "Every cycle of this run is done; add a feature with tinker add, or fix a bug with tinker fix"
             )
@@ -1735,125 +1728,3 @@ class ProjectFolder:
         kept = [word for word in re.findall(r"[a-z0-9]+", task.lower()) if word not in ProjectFolder.COMMON]
         name = "-".join(kept[:2])[: ProjectFolder.NAME_MAX].strip("-")
         return name if ProjectFolder.NAME_RE.fullmatch(name) else "project"
-
-
-class CycleRunner:
-    def __init__(self, session):
-        self.session, self.project = session, session.project
-        self.stopped = None
-
-    def run(self, cycle, web=False):
-        steps = Steps(FIX_PHASES if cycle.get("kind") == "fix" else PHASES, self.session.tracker)
-        self.session.cycle = cycle
-        if web and cycle["phase"] not in ("recall", "done") and not cycle.get("awaiting"):
-            self.recall_first(cycle, steps)
-        went = steps.run(
-            cycle["phase"],
-            lambda phase: self.phase_done(phase, cycle),
-            lambda phase: self.reached(phase, cycle),
-            waits=lambda: cycle.get("awaiting"),
-        )
-        if went == "waiting":
-            return "awaiting"
-        Scratchpad.write({"chat": cycle.get("chat", "cli"), "task": cycle["request"], "status": went})
-        return went
-
-    def phase_done(self, phase, cycle):
-        if self.run_phase(phase, cycle) is False:
-            self.disprove(cycle, phase)
-            return False
-        if phase in FORMATTER_RUNS_AFTER:
-            self.session.format_code()
-        if self.waits_for_confirm(phase, cycle):
-            cycle["awaiting"] = True
-        if phase == "review":
-            self.show_plan()
-        return True
-
-    def reached(self, phase, cycle):
-        cycle["phase"] = phase
-        self.session.save()
-
-    def recall_first(self, cycle, steps):
-        steps.enter("recall")
-        with say.part(f"{Recaller.TITLE} (with --web, before {cycle['phase']})", Tracker.icon("recall")):
-            Recaller(self.session).run(cycle)
-
-    def run_phase(self, phase, cycle):
-        worker = self.phase_class(phase)(self.session)
-        if not worker.TITLE:
-            return self.result(worker.run(cycle))
-        started = time.perf_counter()
-        with say.part(self.phase_title(worker, phase, cycle), Tracker.icon(phase)):
-            went = self.result(worker.run(cycle))
-            if went is not False:
-                say.took(Tracker.done_words(phase), time.perf_counter() - started)
-        if self.session.tracker is not None:
-            self.session.tracker.outcome(self.outcome(phase, cycle))
-        return went
-
-    @staticmethod
-    def phase_title(worker, phase, cycle):
-        if phase != "spec":
-            return worker.TITLE
-        return f"{worker.TITLE} ({'project' if cycle['id'] == 'base' else 'feature ' + cycle['id']})"
-
-    def result(self, went):
-        if isinstance(went, Stopped):
-            self.stopped = went
-            return False
-        return went
-
-    def outcome(self, phase, cycle):
-        criteria = self.project.cycle_criteria(cycle)
-        green, _, total = self.project.counts()
-        return {
-            "spec": f"{len(criteria)} point(s) to test",
-            "design": f"{len(cycle.get('files', []))} file(s)",
-            "tests": f"{sum(TestRef(criterion['test']).present(self.session.workspace) for criterion in criteria)}"
-            f"/{len(criteria)} test(s) written",
-            "code": f"{len(cycle.get('code_done', []))} file(s) written",
-            "verify": f"{green}/{total} spec points pass",
-        }.get(phase, "")
-
-    @staticmethod
-    def phase_class(phase):
-        return {
-            "recall": Recaller,
-            "spec": SpecWriter,
-            "design": Designer,
-            "review": InterfaceReviewer,
-            "setup": TestToolSetup,
-            "tests": TestWriter,
-            "code": CodeWriter,
-            "verify": Verifier,
-            "tidy": Tidy,
-            "final_review": FinalReview,
-            "docs": ReadmeWriter,
-            "lessons": LessonWriter,
-            "reproduce": BugReproducer,
-        }[phase]
-
-    @staticmethod
-    def waits_for_confirm(phase, cycle):
-        return (
-            phase == CONFIRM_AFTER[cycle.get("kind", "feature")]
-            and cycle.get("confirm")
-            and not cycle.get("confirmed")
-        )
-
-    def disprove(self, cycle, phase):
-        gone = self.session.knowledge.disprove(
-            cycle.get("used", {}), self.session.failed_phases(phase, self.stopped)
-        )
-        if gone:
-            say.info(f"{gone} principle(s) used in this step are discarded: they did not hold", "🗑️")
-        self.session.save()
-
-    def show_plan(self):
-        with say.part(f"Plan: {len(self.project.criteria)} spec criteria (see SPEC.md)", "📋"):
-            for criterion in self.project.criteria:
-                say.text(
-                    f"{criterion['id']:5} [{STATUS_TEXT.get(criterion['status'], criterion['status'])}] "
-                    f"effort {criterion.get('effort', 2)} {criterion['title']}  -> {criterion['test']}"
-                )

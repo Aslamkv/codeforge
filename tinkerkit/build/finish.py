@@ -21,6 +21,7 @@ Lessons = namedtuple("Lessons", "new confirmed")
 
 
 class Tidy(Phase):
+    NAME = "tidy"
     TITLE = "Tidy (the linter over the code)"
     MAX_FILES_PER_PASS = FILES_SHOWN_PER_FIX
 
@@ -133,6 +134,7 @@ class Tidy(Phase):
 
 
 class ReadmeWriter(Phase):
+    NAME = "docs"
     TITLE = "README (and its examples run, as a user would)"
     MAX_USAGE_EXAMPLES = 12
     EXAMPLE_FIX_ROUNDS = 2
@@ -447,6 +449,7 @@ class ReadmeWriter(Phase):
 
 
 class FinalReview(Phase):
+    NAME = "final_review"
     TITLE = "Final review (the project as a person runs it)"
 
     def run(self, cycle):
@@ -504,6 +507,7 @@ class FinalReview(Phase):
 
 
 class LessonWriter(Phase):
+    NAME = "lessons"
     TITLE = "Lessons (for the next projects)"
 
     def run(self, cycle):

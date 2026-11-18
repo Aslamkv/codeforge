@@ -3359,7 +3359,7 @@ def test_a_terminal_alone_hands_no_goodbye_on(monkeypatch):
     assert handed == [] and "not listening" in out.getvalue()
 
 
-@pytest.mark.spec("CLI-11")
+@pytest.mark.spec("CLI-10")
 def test_a_chat_unloads_the_model_in_use_and_the_embedding_model_when_it_ends(
     desk, home_store, monkeypatch, fake_ollama
 ):

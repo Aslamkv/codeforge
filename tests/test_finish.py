@@ -54,6 +54,16 @@ $ not an example
 """
 
 
+@pytest.mark.spec("SES-5")
+def test_the_finish_phases_say_what_the_cycle_shows_of_them(built):
+    session, project = built
+    cycle = project.cycles[0]
+    phases = [Tidy(session), ReadmeWriter(session), FinalReview(session), LessonWriter(session)]
+    assert [phase.NAME for phase in phases] == ["tidy", "docs", "final_review", "lessons"]
+    assert [phase.confirms for phase in phases] == [False] * 4
+    assert [phase.outcome(cycle) for phase in phases] == [""] * 4
+
+
 @pytest.mark.spec("FIN-3")
 def test_examples():
     assert ReadmeWriter.examples(README) == [

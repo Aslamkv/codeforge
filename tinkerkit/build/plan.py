@@ -20,6 +20,7 @@ lazy from ..settings import (
     FACT_PHASES,
     KINDS,
     MAX_RECALL_TOPICS,
+    STATUS_TEXT,
     TOPIC_RELEVANT_SIMILARITY,
     Config,
 )
@@ -33,6 +34,7 @@ ContractPrompt = namedtuple("ContractPrompt", "parts left")
 
 
 class Recaller(Phase):
+    NAME = "recall"
     TITLE = "Recall (what Tinker has learned)"
 
     def run(self, cycle):
@@ -235,7 +237,14 @@ class Recaller(Phase):
 
 
 class SpecWriter(Phase):
+    NAME = "spec"
     TITLE = "Plan: the spec"
+
+    def title(self, cycle):
+        return f"{self.TITLE} ({'project' if cycle.id == 'base' else 'feature ' + cycle.id})"
+
+    def outcome(self, cycle):
+        return f"{len(self.project.cycle_criteria(cycle))} point(s) to test"
 
     def run(self, cycle):
         if cycle.get("specified"):
@@ -779,7 +788,11 @@ class Working:
 
 
 class Designer(Phase):
+    NAME = "design"
     TITLE = "Plan: the design"
+
+    def outcome(self, cycle):
+        return f"{len(cycle.files)} file(s)"
 
     def run(self, cycle):
         self.ensure_toolchain()
@@ -890,7 +903,20 @@ class Designer(Phase):
 
 
 class InterfaceReviewer(Phase):
+    NAME = "review"
     TITLE = "Plan: review (each file against the contracts it uses)"
+    confirms = True
+
+    def after(self, cycle):
+        self.show_plan()
+
+    def show_plan(self):
+        with say.part(f"Plan: {len(self.project.criteria)} spec criteria (see SPEC.md)", "📋"):
+            for criterion in self.project.criteria:
+                say.text(
+                    f"{criterion['id']:5} [{STATUS_TEXT.get(criterion['status'], criterion['status'])}] "
+                    f"effort {criterion.get('effort', 2)} {criterion['title']}  -> {criterion['test']}"
+                )
 
     def run(self, cycle):
         planned = [path for path in cycle["files"] if self.meets_two_contracts(path)]

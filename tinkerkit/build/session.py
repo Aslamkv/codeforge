@@ -243,7 +243,18 @@ class Worker:
 
 
 class Phase(Worker):
+    NAME = ""
     TITLE = ""
+    confirms = False
+
+    def title(self, cycle):
+        return self.TITLE
+
+    def outcome(self, cycle):
+        return ""
+
+    def after(self, cycle):
+        pass
 
     def run(self, cycle):
         raise NotImplementedError

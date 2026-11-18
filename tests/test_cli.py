@@ -9,13 +9,13 @@ from conftest import LOADING_PHASE, MEASURED, MODEL, PY, TOOLCHAIN, criterion, f
 
 from tinkerkit import cli, logger
 from tinkerkit.build.project import Runs, Tracker, project_store
-from tinkerkit.build.session import Phase, Stopped
-from tinkerkit.cli import Cli, Commands, CycleRunner, Doctor, ProjectFolder, ProjectRun
+from tinkerkit.build.session import Stopped
+from tinkerkit.cli import Cli, Commands, Doctor, ProjectFolder, ProjectRun
 from tinkerkit.knowledge.library import Knowledge, Library, ResearchLearner
 from tinkerkit.knowledge.principles import Principles
 from tinkerkit.memory.interview import Interview
 from tinkerkit.model.models import LoadedModel, Models, Ollama, OllamaError, ThinkLevels
-from tinkerkit.settings import FIX_PHASES, PHASES, QUALITY_VERSION, WORK_THINK, Config, Home
+from tinkerkit.settings import QUALITY_VERSION, WORK_THINK, Config, Home
 from tinkerkit.system import SYSTEM_CHECKS, SystemCheck
 from tinkerkit.workspace import Toolchain
 
@@ -610,127 +610,6 @@ def test_log_prints_the_output_or_the_model_calls(tmp_path, capsys):
 
 
 @pytest.mark.spec("CLI-10")
-def test_each_build_step_says_what_came_of_it(make_project, make_session):
-    project = make_project([criterion("C1", "t.py::a", status="green"), criterion("C2", "t.py::b")])
-    runner, cycle = (
-        CycleRunner(make_session(project)),
-        {"id": "base", "files": ["calc.py", "t.py"], "code_done": ["calc.py"]},
-    )
-    assert [
-        runner.outcome(phase, cycle) for phase in ("spec", "design", "tests", "code", "verify", "tidy")
-    ] == [
-        "2 point(s) to test",
-        "2 file(s)",
-        "0/2 test(s) written",
-        "1 file(s) written",
-        "1/2 spec points pass",
-        "",
-    ]
-
-
-def recording_phases(monkeypatch, stop_at=None):
-    ran = []
-
-    class Recorded(Phase):
-        TITLE = ""
-
-        def run(self, cycle):
-            ran.append(cycle["phase"])
-            return False if cycle["phase"] == stop_at else None
-
-    monkeypatch.setattr(CycleRunner, "phase_class", staticmethod(lambda phase: Recorded))
-    return ran
-
-
-@pytest.mark.spec("CLI-10")
-def test_cycle_runs_its_phases_in_order(session, monkeypatch, project_dir):
-    ran = recording_phases(monkeypatch)
-    formatted = []
-    monkeypatch.setattr(session, "format_code", lambda: formatted.append(session.project.cycles[0]["phase"]))
-    cycle = session.project.cycles[0]
-    assert CycleRunner(session).run(cycle) == "done"
-    assert ran == list(PHASES[:-1]) and formatted == ["verify"] and cycle["phase"] == "done"
-    assert plan_of(project_dir)["cycles"][0]["phase"] == "done" and session.cycle is cycle
-    fix = session.project.new_cycle("f1", "a bug", kind="fix")
-    ran.clear()
-    assert CycleRunner(session).run(fix) == "done" and ran == list(FIX_PHASES[:-1])
-
-
-@pytest.mark.spec("REM-1")
-def test_a_cycle_writes_one_episode_when_it_ends_not_while_it_waits(session, monkeypatch):
-    from tinkerkit.memory.memories import Scratchpad
-
-    recording_phases(monkeypatch)
-    cycle = dict(session.project.cycles[0], confirm=True)
-    session.project.cycles[0] = cycle
-    assert CycleRunner(session).run(cycle) == "awaiting" and Scratchpad.fresh() == []
-    cycle.update(awaiting=False, confirmed=True)
-    assert CycleRunner(session).run(cycle) == "done"
-    [episode] = Scratchpad.fresh()
-    assert episode["task"] == cycle["request"] and episode["status"] == "done" and episode["chat"] == "cli"
-
-
-@pytest.mark.spec("CLI-10")
-def test_cycle_waits_after_its_plan_unless_told_not_to(session, monkeypatch):
-    ran = recording_phases(monkeypatch)
-    cycle = dict(session.project.cycles[0], confirm=True)
-    session.project.cycles[0] = cycle
-    assert CycleRunner(session).run(cycle) == "awaiting" and ran == ["recall", "spec", "design", "review"]
-    assert cycle["phase"] == "setup" and cycle["awaiting"]
-    cycle.update(awaiting=False, confirmed=True)
-    assert CycleRunner(session).run(cycle) == "done"
-    fix = dict(session.project.new_cycle("f1", "a bug", kind="fix"), confirm=True)
-    session.project.cycles[-1] = fix
-    ran.clear()
-    assert CycleRunner(session).run(fix) == "awaiting" and ran == ["recall", "reproduce"]
-    feature = dict(session.project.new_cycle("f2", "more", kind="feature"), confirm=False)
-    session.project.cycles[-1] = feature
-    assert CycleRunner(session).run(feature) == "done"
-
-
-@pytest.mark.spec("CLI-10")
-def test_a_blocked_cycle_disproves_what_it_used_there(session, monkeypatch):
-    recording_phases(monkeypatch, stop_at="verify")
-    knowledge = session.knowledge
-    knowledge.add_lessons(
-        [
-            {"text": "Seed random generators inside tests", "phase": "tests"},
-            {"text": "Pin the toolchain versions", "phase": "toolchain"},
-        ],
-        [],
-    )
-    seed, pin = (lesson["id"] for lesson in knowledge.known_lessons())
-    cycle = session.project.cycles[0]
-    cycle["used"] = {f"lesson:{seed}": ["tests"], f"lesson:{pin}": ["toolchain"]}
-    assert CycleRunner(session).run(cycle) == "blocked" and cycle["phase"] == "verify"
-    assert [lesson["text"] for lesson in Knowledge("Python").known_lessons()] == [
-        "Pin the toolchain versions"
-    ]
-
-
-@pytest.mark.spec("CLI-10")
-def test_a_web_run_past_recall_recalls_first(session, monkeypatch):
-    ran = recording_phases(monkeypatch)
-    recalled = []
-    monkeypatch.setattr(cli.Recaller, "run", lambda self, cycle: recalled.append(cycle["phase"]))
-    cycle = dict(session.project.cycles[0], phase="code")
-    session.project.cycles[0] = cycle
-    assert CycleRunner(session).run(cycle, web=True) == "done"
-    assert recalled == ["code"] and ran[0] == "code"
-    recalled.clear()
-    at_recall_already = dict(session.project.new_cycle("f1", "more"), phase="recall")
-    CycleRunner(session).run(at_recall_already, web=True)
-    assert recalled == []
-
-
-@pytest.mark.spec("CLI-10")
-def test_every_phase_has_a_phase_class():
-    for phase in set(PHASES + FIX_PHASES) - {"done"}:
-        worker = CycleRunner.phase_class(phase)
-        assert issubclass(worker, Phase) and worker.TITLE
-
-
-@pytest.mark.spec("CLI-11")
 @pytest.mark.parametrize(
     "error,message",
     [
@@ -749,7 +628,7 @@ def test_main_ends_cleanly(monkeypatch, error, message):
     assert ended.value.code == message
 
 
-@pytest.mark.spec("CLI-11")
+@pytest.mark.spec("CLI-10")
 @pytest.mark.parametrize("ending", [KeyboardInterrupt, signal.SIGTERM, signal.SIGHUP])
 def test_main_unloads_no_model_however_it_ends(monkeypatch, fake_ollama, ending):
     def end(argv=None):
@@ -783,7 +662,7 @@ def followed(monkeypatch):
     return seen
 
 
-@pytest.mark.spec("CLI-11")
+@pytest.mark.spec("CLI-10")
 def test_a_job_never_unloads_its_model_when_it_ends(monkeypatch, fake_ollama, followed):
     class Kept:
         name = "m"
@@ -1005,7 +884,7 @@ def printed(folder):
     return "\n".join(entry["line"] for _, entry in project_store(folder).entries("output"))
 
 
-@pytest.mark.spec("CLI-12")
+@pytest.mark.spec("CLI-11")
 def test_a_task_is_built_end_to_end(run_ready, fake_ollama, home_store, monkeypatch):
     folder = run_ready
     monkeypatch.setattr(ThinkLevels, "values", staticmethod(lambda name: ["low", "medium", "high"]))
