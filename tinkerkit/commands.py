@@ -379,13 +379,13 @@ COMMANDS = [
     Command(
         "jobs",
         "Jobs",
-        "jobs [running|queued|stopped|finished|archived] [PAGE]",
+        "jobs [running|queued|stopped|finished|archived] [PAGE] | #N",
         "the long commands: running, queued, stopped",
         "List the jobs: every long command (a task, add, fix, learn, ask, teach, read, research, exercise, "
         "model calibrate) is one, numbered #1, #2 ... One runs at a time: a job you start goes to the front of the queue and the one that ran waits "
         "behind it (resume #N: at once). Without a state, the running ones, the queued ones and the stopped ones; "
         "running, queued, stopped, finished or archived (by clear jobs) lists those alone. Newest first, 10 to a "
-        "page (jobs stopped 2: the second page).",
+        "page (jobs stopped 2: the second page). jobs #N shows job #N: its state, title and its last 40 lines of output.",
         kind="glance",
         chat=True,
         words=True,
@@ -393,8 +393,8 @@ COMMANDS = [
             Argument(
                 "words",
                 "*",
-                "[STATE] [PAGE]",
-                "running, queued, stopped, finished or archived; the page, from 1",
+                "[STATE] [PAGE] | #N",
+                "running, queued, stopped, finished or archived; the page, from 1; or #N, one job",
             )
         ],
         example="jobs stopped",

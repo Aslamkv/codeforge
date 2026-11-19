@@ -601,6 +601,16 @@ tinker jobs finished 2   # the second page
 Every numbered list (jobs, readings, the chat history) names the command for its next page. In a chat, an empty
 line right after a page's dim `↵ next page` sends it, and on Telegram a "Next page ›" button does.
 
+See what one job printed: its last 40 lines, after a line saying how many earlier ones were left out:
+
+```sh
+tinker jobs #3
+```
+
+In a chat, `/jobs #3` enters a job that is still in the queue: one message shows its output and keeps up as it
+grows. Anything else you send is answered as usual. `/leave` (or the "⚙️ Leave #3" button on Telegram) leaves it,
+and so does the job's end, whose message says how it ended. A job no longer in the queue is shown once.
+
 See the queue, first job first, and take jobs out of it:
 
 ```sh

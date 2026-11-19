@@ -21,6 +21,7 @@ from .jobs import (
     archived,
     emptied_queue,
     job_number,
+    job_view,
     queue_action,
     queue_lines,
 )
@@ -79,6 +80,33 @@ except ImportError:
 Renamed = namedtuple("Renamed", "project folder")
 LearningTools = namedtuple("LearningTools", "model embeddings internet")
 DoctorCheck = namedtuple("DoctorCheck", "required what check")
+
+
+class JobList(namedtuple("JobList", "state page")):
+    def show(self):
+        jobs = Jobs.listed(self.state)
+        if not jobs:
+            say.text(f"No {self.state or 'running, queued or stopped'} jobs.")
+            return
+        shown, pages = Numbered.page(jobs, self.page)
+        say.text(f"{'JOB':6} {'STATE':9} {'STARTED':17} COMMAND")
+        for job in shown:
+            title = job["title"][:70] + ("..." if len(job["title"]) > 70 else "")
+            say.text(f"{'#' + str(job['number']):6} {job['state']:9} {job['started']:17} {title}")
+        if self.page < pages:
+            state_word = (self.state + " ") if self.state else ""
+            say.text("\n" + next_page_line(self.page, pages, f"jobs {state_word}{self.page + 1}"))
+        elif pages > 1 or self.page > 1:
+            say.text(f"\nPage {self.page} of {pages}.")
+
+
+class JobView(namedtuple("JobView", "number")):
+    def show(self):
+        lines = job_view(self.number)
+        if lines is None:
+            raise SystemExit(f"No job #{self.number} (tinker jobs lists them).")
+        for line in lines:
+            say.text(line)
 
 
 def main():
@@ -466,13 +494,17 @@ class Cli:
                     "use tinker stop (every job of yours that runs) or tinker stop #N (tinker jobs lists them)"
                 )
             return number
+        viewed = job_number(words[0]) if len(words) == 1 else None
+        if viewed is not None:
+            return JobView(viewed)
         state = words[0] if words and words[0] in STATES else None
         rest = words[1:] if state else words
         if len(rest) > 1 or (rest and not Cli.is_page(rest[0])):
             parser.error(
-                "use tinker jobs [running|queued|stopped|finished|archived] [PAGE], e.g. tinker jobs finished 2"
+                "use tinker jobs [running|queued|stopped|finished|archived] [PAGE], e.g. tinker jobs finished 2, "
+                "or tinker jobs #N for one job"
             )
-        return state, int(rest[0]) if rest else 1
+        return JobList(state, int(rest[0]) if rest else 1)
 
     @staticmethod
     def queue_words(words, parser):
@@ -660,7 +692,7 @@ class Commands:
             "dream": lambda: self.tinker(["dream", *args.dream]),
             "skill": lambda: self.tinker(["skill", *args.skill]),
             "runs": self.list_runs,
-            "jobs": lambda: self.list_jobs(*args.jobs),
+            "jobs": lambda: args.jobs.show(),
             "stop": lambda: self.stop(args.stop),
             "queue": lambda: self.queue(args.queue),
             "status": lambda: self.show_status(args.status, args.workdir),
@@ -899,22 +931,6 @@ class Commands:
                 f"{Runs.short_folder(entry.get('workdir', '')):32} "
                 f"{task[:60] + ('...' if len(task) > 60 else '')}"
             )
-
-    @staticmethod
-    def list_jobs(state, page):
-        jobs = Jobs.listed(state)
-        if not jobs:
-            say.text(f"No {state or 'running, queued or stopped'} jobs.")
-            return
-        shown, pages = Numbered.page(jobs, page)
-        say.text(f"{'JOB':6} {'STATE':9} {'STARTED':17} COMMAND")
-        for job in shown:
-            title = job["title"][:70] + ("..." if len(job["title"]) > 70 else "")
-            say.text(f"{'#' + str(job['number']):6} {job['state']:9} {job['started']:17} {title}")
-        if page < pages:
-            say.text("\n" + next_page_line(page, pages, f"jobs {(state + ' ') if state else ''}{page + 1}"))
-        elif pages > 1 or page > 1:
-            say.text(f"\nPage {page} of {pages}.")
 
     @staticmethod
     def stop(number):

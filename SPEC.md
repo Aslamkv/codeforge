@@ -447,7 +447,10 @@ goes to the front, so the person is always answered first.
   (`resume #N`) starts its tracker with `resumed`, so its message comes to the bottom of the chat.
 - **JOB-6** `tinker jobs [running|queued|stopped|finished|archived] [PAGE]` lists the jobs by page
   ([State](#state)): with no state, the running one, then the queued ones in queue order, then the stopped
-  ones. Any other words are an error.
+  ones. Any other words are an error. `tinker jobs #N` shows job #N's view: its number, state and title, then
+  what it has printed so far (log `output #N`), its last `JOB_OUTPUT_LINES` lines, saying how many earlier ones
+  are left out, or that it has printed nothing yet, or, archived, that its output is gone. An unknown job is an
+  error. In a chat, `/jobs #N` enters the job (**CNV-25**).
 - **JOB-7** `tinker stop #N` takes job #N out of the queue and, if it runs, sends it `JOB_STOP_SIGNAL`, as
   Ctrl-C (one not in the queue is an error); `tinker stop` stops the job that runs, whatever it is, a chat's
   answer too. In the conversation, `/stop #N` stops that job (the task started here, the exercise in its own
@@ -1269,8 +1272,13 @@ The terminal and the chats are one conversation: the same commands, the same ans
   to send `/fresh`; on a channel with buttons (Telegram) it also gets a "🔄 Fresh answer" button whose tap
   sends `/fresh`; an edit of that reply keeps the button. The dream then updates the old answer memory with the
   new answer.
-- **CNV-25** A chat is in at most one mode at a time, inside a reading or in the interview (**INT-1**): entering one
-  leaves the other, and `/leave` leaves either. A chat is inside a reading once it keeps one (`read FILE|URL`, a file dropped or sent, **CNV-26**,
+- **CNV-25** A chat is in at most one mode at a time, inside a reading, in the interview (**INT-1**) or inside a
+  job: entering one leaves the other, and `/leave` leaves any. `/jobs #N` enters job #N while it is in the queue:
+  one message shows its view (**JOB-6**) and is edited every `PROGRESS_EDIT_SECONDS` seconds while what it printed
+  grows, so the job runs in front of the person; a plain message and a `/command` are answered as outside. When
+  the job leaves the queue its message shows its last lines and how it ended, and the chat leaves the job. A job
+  not in the queue is not entered: its view is shown once. The terminal's prompt is `⚙️ #N Title ›` while
+  inside; on a channel with buttons the job's message gets a "⚙️ Leave #N" button whose tap sends `/leave`. A chat is inside a reading once it keeps one (`read FILE|URL`, a file dropped or sent, **CNV-26**,
   **CHN-9**) or the person sends `read #N`; a reading kept with no chapters is not entered. Entering says so in
   one line with how to leave. Inside, a plain message is answered in one model call from that reading's passages
   most about it (**RDG-13**), with its image when it is one and the model sees (**MOD-23**): no command is named

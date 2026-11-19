@@ -18,6 +18,7 @@ from .build.project import Runs, Tracker, saved
 from .chat.console import EXIT_WORDS, ConsoleChannel, PreviewFailed, keep_typing, typed_here
 from .chat.markup import Markup, Message, md
 from .chat.reports import (
+    PROGRESS_EDIT_SECONDS,
     Progress,
     Reporter,
     described,
@@ -54,13 +55,16 @@ from .commands import (
     refs,
 )
 from .jobs import (
+    JOBS,
     Jobs,
     Queue,
     Runner,
     answer_stopped,
     answering,
     emptied_queue,
+    ending,
     job_number,
+    job_view,
     queue_action,
     queue_lines,
     stop_answers,
@@ -125,6 +129,7 @@ CHAT_SKIP = "/skip"
 NEXT_PAGE_BUTTON = "Next page ›"
 FRESH_ANSWER_BUTTON = "🔄 Fresh answer"
 LEAVE_READING_BUTTON = "📕 Leave #{number}"
+LEAVE_JOB_BUTTON = "⚙️ Leave #{number}"
 SKIP_QUESTION_BUTTON = "⏭ Skip"
 LEAVE_INTERVIEW_BUTTON = "🚪 Leave"
 INTERVIEW_ENTERED = "💬 **Interview**: answer, /skip · /leave leaves it"
@@ -201,7 +206,7 @@ class InsideReading(NamedTuple):
 
     def answer(self, desk, channel, message):
         sent = channel.send(message.chat, self.answer_text(desk, channel, message))
-        channel.offer_leave(message.chat, sent, self.number)
+        channel.offer_leave(message.chat, sent, LEAVE_READING_BUTTON.format(number=self.number))
 
     def answer_text(self, desk, channel, message):
         try:
@@ -210,7 +215,7 @@ class InsideReading(NamedTuple):
         except OllamaError as exc:
             return md(t"⚠️ **The model did not answer:** {first_words(exc)}")
 
-    def offer(self, channel, chat, shown):
+    def offer(self, desk, channel, chat, shown):
         pass
 
     def entered_line(self, chat):
@@ -244,9 +249,9 @@ class InsideInterview(NamedTuple):
             channel.send(message.chat, turn.text)
             desk.leave_mode(channel, message.chat)
         else:
-            self.offer(channel, message.chat, channel.send(message.chat, turn.text))
+            self.offer(desk, channel, message.chat, channel.send(message.chat, turn.text))
 
-    def offer(self, channel, chat, shown):
+    def offer(self, desk, channel, chat, shown):
         channel.offer_answers(chat, shown)
 
     def opening(self, turn):
@@ -266,6 +271,88 @@ class InsideInterview(NamedTuple):
 
     def takes(self, text):
         return text.split() == [CHAT_SKIP] or not text.startswith("/")
+
+
+class InsideJob(NamedTuple):
+    number: int
+    title: str
+
+    def offer(self, desk, channel, chat, shown):
+        JobFollower(desk, channel, chat, self, shown).start()
+        self.offer_leave(channel, chat, shown)
+
+    def offer_leave(self, channel, chat, shown):
+        channel.offer_leave(chat, shown, LEAVE_JOB_BUTTON.format(number=self.number))
+
+    def entered_line(self, chat):
+        return md(t"⚙️ **Inside #{self.number} {self.title}** · `/leave` leaves it\n{self.view():block}")
+
+    def shown_once(self):
+        return md(t"⚙️ **jobs #{self.number}**\n{self.view():block}")
+
+    def ended_line(self):
+        return md(t"⚙️ **jobs #{self.number}**\n{self.ended_view():block}\n{ending(self.number)}")
+
+    def ended_view(self):
+        header, *lines = job_view(self.number)
+        if JOBS.get(self.number)["state"] in ("running", "queued"):
+            header = f"#{self.number} ended {self.title}"
+        return "\n".join([header, *lines])
+
+    def view(self):
+        return "\n".join(job_view(self.number))
+
+    def left_line(self):
+        return md(t"⚙️ **Left #{self.number} {self.title}**")
+
+    def env(self):
+        return {}
+
+    def gone(self, shelf):
+        return self.number not in Queue.ordered()
+
+    def prompt(self):
+        return f"⚙️ #{self.number} {self.title} › "
+
+    def takes(self, text):
+        return False
+
+
+class JobFollower:
+    def __init__(self, desk, channel, chat, mode, sent):
+        self.desk, self.channel, self.chat, self.mode = desk, channel, chat, mode
+        self.shown, self.text = [sent], mode.entered_line(chat)
+
+    def start(self):
+        threading.Thread(target=self.keep_up, daemon=True).start()
+
+    def keep_up(self):
+        while True:
+            time.sleep(PROGRESS_EDIT_SECONDS)
+            if not self.step():
+                return
+
+    def step(self):
+        if self.desk.inside.get(self.chat) is not self.mode:
+            return False
+        if self.mode.gone(self.desk.shelf):
+            self.end()
+            return False
+        self.follow()
+        return True
+
+    def end(self):
+        self.channel.show(self.chat, self.shown, self.mode.ended_line(), done=True)
+        if self.desk.inside.get(self.chat) is self.mode:
+            self.desk.leave_mode(self.channel, self.chat)
+
+    def follow(self):
+        text = self.mode.entered_line(self.chat)
+        if text == self.text:
+            return
+        self.text = text
+        self.shown = self.channel.show_growing(self.chat, self.shown, text)
+        self.mode.offer_leave(self.channel, self.chat, self.shown[-1])
 
 
 def session(root, shelf=None, interview=None, interviewing=False):
@@ -781,11 +868,11 @@ class Desk:
     def offer_if_entered(self, channel, chat, sent, mode_before):
         mode = self.inside.get(chat)
         if mode is not None and mode is not mode_before:
-            mode.offer(channel, chat, sent)
+            mode.offer(self, channel, chat, sent)
 
     def left(self, channel, chat):
         if chat not in self.inside:
-            return "📕 **Not inside a reading**"
+            return "📕 **Not inside a reading, the interview or a job**"
         return self.leave_mode(channel, chat).left_line()
 
     def left_if_gone(self, channel, chat):
@@ -971,6 +1058,7 @@ class Desk:
             "memory": lambda: self.memory_or_dream(channel, message.chat, words),
             "dream": lambda: self.memory_or_dream(channel, message.chat, words),
             "interact": lambda: self.interviewed(channel, message.chat),
+            "jobs": lambda: self.jobs(channel, message.chat, words),
             **{word: lambda: self.ask_to_exit(channel, message.chat, command) for word in EXIT_WORDS},
         }
 
@@ -1011,6 +1099,18 @@ class Desk:
         mode = InsideInterview(self.interview)
         self.now_in(channel, chat, mode)
         return mode.opening(turn.text)
+
+    def jobs(self, channel, chat, words):
+        number = job_number(words[1]) if len(words) == 2 else None
+        if number is None:
+            return self.by_table(channel, chat, words)
+        job = Jobs.get(number)
+        if job is None:
+            return md(t"⚙️ **No job #{number}** (`/jobs` lists them)")
+        mode = InsideJob(number, job["title"])
+        if mode.gone(self.shelf):
+            return mode.shown_once()
+        return self.entered_mode(channel, chat, mode)
 
     def entered_mode(self, channel, chat, mode):
         self.now_in(channel, chat, mode)

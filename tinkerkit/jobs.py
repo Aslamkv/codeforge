@@ -34,6 +34,7 @@ RUNNER_JOB_ENV = "TINKER_RUNNER_JOB"
 QUEUE_LOOK_SECONDS = 1
 WAITING = ("running", "queued", "paused")
 ANSWERS = {}
+JOB_OUTPUT_LINES = 40
 
 
 class Queue:
@@ -216,6 +217,34 @@ class Follower:
                 self.exit = entry["exit"]
         self.seen = len(entries)
         return not entries or "exit" in entries[-1]
+
+
+def job_view(number):
+    job = Jobs.get(number)
+    if job is None:
+        return None
+    return [f"#{number} {job['state']} {job['title']}", *output_lines(job)]
+
+
+def output_lines(job):
+    if job["state"] == "archived":
+        return ["Its output is gone."]
+    printed = output_entries(job["number"], "line")
+    if not printed:
+        return ["It has printed nothing yet."]
+    left_out = len(printed) - JOB_OUTPUT_LINES
+    return ([f"{left_out} earlier lines left out."] if left_out > 0 else []) + printed[-JOB_OUTPUT_LINES:]
+
+
+def ending(number):
+    exits = output_entries(number, "exit")
+    if not exits:
+        return "It stopped before it ended."
+    return f"It ended with exit code {exits[-1]}."
+
+
+def output_entries(number, key):
+    return [entry[key] for _, entry in Home.store().entries(f"output #{number}") if key in entry]
 
 
 def runner_job():

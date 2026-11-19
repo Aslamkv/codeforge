@@ -25,6 +25,7 @@ from test_console import (
     typing,
     wait_until,
 )
+from test_jobs import put_job
 from test_reports import PLAN, everyone, keep_job, snapshot
 from test_shell import REMEMBERED_REPLY, chatted_episode, pausing_into, remembering
 from test_skills import made_skill
@@ -45,7 +46,9 @@ from tinkerkit.desk import (
     ChatState,
     Desk,
     InsideInterview,
+    InsideJob,
     InsideReading,
+    JobFollower,
     NoInterview,
     NoWaitingPlan,
     Talk,
@@ -2327,7 +2330,7 @@ def test_leave_leaves_the_reading_and_plain_messages_go_back_to_the_chat(inside)
     desk.handle(channel, Message("1", "hello"))
     assert asked == ["talk"]
     desk.handle(channel, Message("1", "/leave"))
-    assert channel.texts()[-1] == "📕 **Not inside a reading**"
+    assert channel.texts()[-1] == "📕 **Not inside a reading, the interview or a job**"
 
 
 @pytest.mark.spec("CNV-25")
@@ -2342,7 +2345,7 @@ def test_the_channel_is_told_on_entering_and_leaving_a_reading(inside):
 def test_each_answer_inside_offers_the_leave_button(inside):
     desk, channel, _ = inside
     desk.handle(channel, Message("1", "what is it"))
-    assert channel.log[-1] == ("leave", "1", channel.newest["1"], 3)
+    assert channel.log[-1] == ("leave", "1", channel.newest["1"], "📕 Leave #3")
 
 
 @pytest.mark.spec("CNV-25")
@@ -2599,6 +2602,190 @@ def test_the_terminal_prompt_says_interact_inside_the_interview(monkeypatch):
     channel = ConsoleChannel()
     channel.now_inside("console", InsideInterview(NoInterview()))
     assert channel.prompt() == "💬 interact › "
+
+
+def queued_job(home_store, number, title):
+    put_job(home_store, number, title=title, state="running", pid=os.getpid(), arguments=title.split())
+    Queue.place(number, lambda others: others + [number])
+
+
+def dequeued(number):
+    Queue.place(number, lambda others: [other for other in others if other != number])
+
+
+@pytest.fixture
+def in_job(desk, home_store, monkeypatch):
+    desk, channel, _ = desk
+    monkeypatch.setattr("tinkerkit.desk.PROGRESS_EDIT_SECONDS", 1000)
+    queued_job(home_store, 4, "learn rust")
+    asked = []
+    desk.talk.answer = lambda channel, message, *rest, **options: asked.append("talk")
+    desk.handle(channel, Message("1", "/jobs #4"))
+    return desk, channel, asked
+
+
+@pytest.mark.spec("CNV-25", "JOB-6")
+def test_jobs_of_a_queued_job_enters_it_showing_its_view(in_job):
+    desk, channel, _ = in_job
+    assert desk.inside == {"1": InsideJob(4, "learn rust")}
+    assert ("inside", "1", None, desk.inside["1"]) in channel.log
+    shown = channel.texts()[-1]
+    assert "#4 running learn rust" in shown and "`/leave` leaves it" in shown
+
+
+@pytest.mark.spec("CNV-25")
+def test_inside_a_job_plain_messages_and_commands_are_answered_as_outside(in_job):
+    desk, channel, asked = in_job
+    desk.handle(channel, Message("1", "hello"))
+    desk.handle(channel, Message("1", "/read list"))
+    assert asked == ["talk"] and desk.ran[-1] == ["read", "list"] and "1" in desk.inside
+
+
+@pytest.mark.spec("CNV-25")
+def test_leave_leaves_the_job(in_job):
+    desk, channel, _ = in_job
+    desk.handle(channel, Message("1", "/leave"))
+    assert channel.texts()[-1] == "⚙️ **Left #4 learn rust**" and desk.inside == {}
+
+
+@pytest.mark.spec("CNV-25", "JOB-6")
+def test_jobs_of_a_job_not_in_the_queue_shows_its_view_once(desk, home_store):
+    desk, channel, _ = desk
+    put_job(home_store, 2, title="learn go", state="finished")
+    desk.handle(channel, Message("1", "/jobs #2"))
+    assert desk.inside == {} and "#2 finished learn go" in channel.texts()[-1]
+
+
+@pytest.mark.spec("CNV-25")
+def test_jobs_of_an_unknown_job_says_so(desk):
+    desk, channel, _ = desk
+    desk.handle(channel, Message("1", "/jobs #9"))
+    assert desk.inside == {} and channel.texts()[-1].startswith("⚙️ **No job #9**")
+
+
+@pytest.mark.spec("CNV-25")
+def test_other_jobs_commands_run_as_before(desk):
+    desk, channel, _ = desk
+    desk.handle(channel, Message("1", "/jobs stopped"))
+    assert desk.ran[-1] == ["jobs", "stopped"] and desk.inside == {}
+
+
+@pytest.mark.spec("CNV-25")
+def test_a_job_left_the_queue_is_left_on_the_next_message(in_job):
+    desk, channel, asked = in_job
+    dequeued(4)
+    desk.handle(channel, Message("1", "hello"))
+    assert desk.inside == {} and asked == ["talk"]
+
+
+def following(desk, channel):
+    return JobFollower(desk, channel, "1", desk.inside["1"], channel.newest["1"])
+
+
+@pytest.mark.spec("CNV-25")
+def test_entering_a_job_offers_its_leave_button(in_job):
+    desk, channel, _ = in_job
+    assert ("leave", "1", channel.newest["1"], "⚙️ Leave #4") in channel.log
+
+
+@pytest.mark.spec("CNV-25", "JOB-6")
+def test_a_followed_job_message_is_edited_when_its_view_changes(in_job, home_store):
+    desk, channel, _ = in_job
+    follower, entered = following(desk, channel), channel.newest["1"]
+    before = len(channel.log)
+    assert follower.step() and len(channel.log) == before
+    Log(home_store, "output #4").add({"line": "reading the rust book"})
+    assert follower.step()
+    edited = [entry for entry in channel.log[before:] if entry[0] == "edit"]
+    assert [entry[2] for entry in edited] == [entered]
+    assert "reading the rust book" in edited[0][3] and "`/leave` leaves it" in edited[0][3]
+    assert channel.log[-1] == ("leave", "1", entered, "⚙️ Leave #4")
+
+
+@pytest.mark.spec("CNV-25", "JOB-6")
+def test_a_followed_job_leaving_the_queue_shows_how_it_ended_and_leaves(in_job, home_store):
+    desk, channel, _ = in_job
+    follower, sent = following(desk, channel), len([entry for entry in channel.log if entry[0] == "send"])
+    put_job(home_store, 4, title="learn rust", state="finished")
+    Log(home_store, "output #4").add({"line": "reading the rust book"})
+    Log(home_store, "output #4").add({"exit": 0})
+    dequeued(4)
+    assert not follower.step()
+    assert desk.inside == {} and ("inside", "1", None, None) in channel.log
+    ended = channel.texts()[-1]
+    assert "#4 finished learn rust" in ended and "reading the rust book" in ended
+    assert "```\nIt ended with exit code 0." in ended
+    assert len([entry for entry in channel.log if entry[0] == "send"]) == sent
+
+
+@pytest.mark.spec("CNV-25", "JOB-6")
+def test_a_followed_job_leaving_the_queue_without_an_exit_says_it_stopped(in_job, home_store):
+    desk, channel, _ = in_job
+    follower = following(desk, channel)
+    put_job(home_store, 4, title="learn rust", state="stopped")
+    dequeued(4)
+    assert not follower.step()
+    assert "```\nIt stopped before it ended." in channel.texts()[-1]
+
+
+@pytest.mark.spec("CNV-25", "JOB-6")
+def test_a_followed_job_leaving_the_queue_still_running_reads_ended(in_job, home_store):
+    desk, channel, _ = in_job
+    follower = following(desk, channel)
+    Log(home_store, "output #4").add({"exit": 1})
+    dequeued(4)
+    assert not follower.step()
+    ended = channel.texts()[-1]
+    assert "#4 ended learn rust" in ended and "running" not in ended
+    assert "```\nIt ended with exit code 1." in ended
+
+
+@pytest.mark.spec("CNV-25")
+def test_a_followed_job_stops_once_the_chat_left_it(in_job):
+    desk, channel, _ = in_job
+    follower = following(desk, channel)
+    desk.handle(channel, Message("1", "/leave"))
+    before = len(channel.log)
+    assert not follower.step() and len(channel.log) == before
+
+
+@pytest.mark.spec("CNV-25")
+def test_a_followed_job_ending_after_the_chat_left_it_leaves_nothing_else(in_job, home_store):
+    desk, channel, _ = in_job
+    follower = following(desk, channel)
+    dequeued(4)
+    desk.handle(channel, Message("1", "/leave"))
+    follower.end()
+    assert desk.inside == {}
+    assert [entry for entry in channel.log if entry[0] == "inside" and entry[3] is None] == [
+        ("inside", "1", None, None)
+    ]
+
+
+@pytest.mark.spec("CNV-25")
+def test_entering_a_job_leaves_a_reading(inside, home_store, monkeypatch):
+    monkeypatch.setattr("tinkerkit.desk.PROGRESS_EDIT_SECONDS", 1000)
+    desk, channel, _ = inside
+    queued_job(home_store, 4, "learn rust")
+    desk.handle(channel, Message("1", "/jobs #4"))
+    assert desk.inside == {"1": InsideJob(4, "learn rust")}
+
+
+@pytest.mark.spec("CNV-25")
+def test_entering_the_interview_leaves_a_job(in_job):
+    desk, channel, _ = in_job
+    editor_question()
+    desk.interview = Interview()
+    desk.interviewed(channel, "1")
+    assert desk.inside["1"] == InsideInterview(desk.interview)
+
+
+@pytest.mark.spec("CNV-25")
+def test_the_terminal_prompt_names_the_job_while_inside(monkeypatch):
+    monkeypatch.setattr("tinkerkit.chat.console.typed_here", lambda: True)
+    channel = ConsoleChannel()
+    channel.now_inside("console", InsideJob(4, "learn rust"))
+    assert channel.prompt() == "⚙️ #4 learn rust › "
 
 
 @pytest.mark.spec("CNV-25")

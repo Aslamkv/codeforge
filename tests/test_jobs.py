@@ -14,13 +14,26 @@ from tinkerkit import desk as desk_module
 from tinkerkit.build.project import Tracker
 from tinkerkit.chat import reports
 from tinkerkit.chat.markup import Message
-from tinkerkit.cli import Cli, Commands
+from tinkerkit.cli import Cli, Commands, JobList, JobView
 from tinkerkit.desk import Desk
-from tinkerkit.jobs import JOBS, Jobs, Queue, Runner, archived, began_at, calls_log, is_job, journaled, today
+from tinkerkit.jobs import (
+    JOB_OUTPUT_LINES,
+    JOBS,
+    Jobs,
+    Queue,
+    Runner,
+    archived,
+    began_at,
+    calls_log,
+    is_job,
+    journaled,
+    today,
+)
 from tinkerkit.knowledge.curriculum import SlotLearner
 from tinkerkit.knowledge.library import Learner, Researcher
 from tinkerkit.model.models import Ollama
-from tinkerkit.settings import DREAM_IDLE_SECONDS, JOB_START_TRIES, JOB_STOP_SIGNAL, Config
+from tinkerkit.settings import DREAM_IDLE_SECONDS, JOB_START_TRIES, JOB_STOP_SIGNAL, Config, Home
+from tinkerkit.store import Log
 
 DEAD_PID = 999999999
 
@@ -300,12 +313,12 @@ def keep_jobs(home_store, states):
 
 @pytest.mark.spec("JOB-6")
 def test_jobs_lists_running_then_stopped_newest_first(home_store, capsys):
-    Commands.list_jobs(None, 1)
+    JobList(None, 1).show()
     assert "No running, queued or stopped jobs." in capsys.readouterr().out
     keep_jobs(home_store, ["stopped", "running", "finished", "stopped", "running"])
     assert [job["number"] for job in Jobs.listed()] == [5, 2, 4, 1]
     assert [job["number"] for job in Jobs.listed("finished")] == [3]
-    Commands.list_jobs("stopped", 1)
+    JobList("stopped", 1).show()
     out = capsys.readouterr().out
     assert out.index("#4") < out.index("#1") and "learn topic 4" in out and "#5" not in out
 
@@ -313,23 +326,71 @@ def test_jobs_lists_running_then_stopped_newest_first(home_store, capsys):
 @pytest.mark.spec("JOB-6")
 def test_jobs_come_a_page_at_a_time(home_store, capsys):
     keep_jobs(home_store, ["finished"] * 23)
-    Commands.list_jobs("finished", 1)
+    JobList("finished", 1).show()
     out = capsys.readouterr().out
     assert "#23" in out and "#14" in out and "#13" not in out and "tinker jobs finished 2 for more" in out
-    Commands.list_jobs("finished", 3)
+    JobList("finished", 3).show()
     out = capsys.readouterr().out
     assert "#3" in out and "#1 " in out and "Page 3 of 3." in out
 
 
 @pytest.mark.spec("JOB-6")
 def test_tinker_jobs_takes_a_state_and_a_page():
-    assert Cli.parse(["jobs"]).jobs == (None, 1)
-    assert Cli.parse(["jobs", "stopped"]).jobs == ("stopped", 1)
-    assert Cli.parse(["jobs", "finished", "2"]).jobs == ("finished", 2)
-    assert Cli.parse(["jobs", "3"]).jobs == (None, 3)
-    for words in (["jobs", "done"], ["jobs", "0"], ["jobs", "running", "1", "2"]):
+    assert Cli.parse(["jobs"]).jobs == JobList(None, 1)
+    assert Cli.parse(["jobs", "stopped"]).jobs == JobList("stopped", 1)
+    assert Cli.parse(["jobs", "finished", "2"]).jobs == JobList("finished", 2)
+    assert Cli.parse(["jobs", "3"]).jobs == JobList(None, 3)
+    assert Cli.parse(["jobs", "#4"]).jobs == JobView(4)
+    for words in (["jobs", "done"], ["jobs", "0"], ["jobs", "running", "1", "2"], ["jobs", "#4", "2"]):
         with pytest.raises(SystemExit):
             Cli.parse(words)
+
+
+def print_lines(number, count, exit_code=None):
+    output = Log(Home.store(), f"output #{number}")
+    for line in range(1, count + 1):
+        output.add({"line": f"line {line}"})
+    if exit_code is not None:
+        output.add({"exit": exit_code})
+
+
+@pytest.mark.spec("JOB-6")
+def test_jobs_number_shows_the_last_lines_of_its_output(home_store, capsys):
+    keep_jobs(home_store, ["finished"])
+    print_lines(1, JOB_OUTPUT_LINES + 5, exit_code=0)
+    JobView(1).show()
+    out = capsys.readouterr().out.splitlines()
+    assert out[0] == "#1 finished learn topic 1"
+    assert out[1] == "5 earlier lines left out."
+    assert out[2:] == [f"line {line}" for line in range(6, JOB_OUTPUT_LINES + 6)]
+
+
+@pytest.mark.spec("JOB-6")
+def test_jobs_number_shows_all_of_a_short_output(home_store, capsys):
+    keep_jobs(home_store, ["stopped"])
+    print_lines(1, 3)
+    JobView(1).show()
+    assert capsys.readouterr().out.splitlines() == ["#1 stopped learn topic 1", "line 1", "line 2", "line 3"]
+
+
+@pytest.mark.spec("JOB-6")
+def test_jobs_number_says_when_nothing_is_printed_yet(home_store, capsys):
+    keep_jobs(home_store, ["stopped"])
+    JobView(1).show()
+    assert capsys.readouterr().out.splitlines() == ["#1 stopped learn topic 1", "It has printed nothing yet."]
+
+
+@pytest.mark.spec("JOB-6")
+def test_jobs_number_says_an_archived_output_is_gone(home_store, capsys):
+    keep_jobs(home_store, ["archived"])
+    JobView(1).show()
+    assert capsys.readouterr().out.splitlines() == ["#1 archived learn topic 1", "Its output is gone."]
+
+
+@pytest.mark.spec("JOB-6")
+def test_jobs_number_of_an_unknown_job_is_an_error(home_store):
+    with pytest.raises(SystemExit, match="No job #7"):
+        JobView(7).show()
 
 
 @pytest.mark.spec("JOB-7")

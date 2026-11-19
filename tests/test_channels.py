@@ -445,7 +445,7 @@ def test_an_edit_keeps_the_fresh_answer_button():
 @pytest.mark.spec("CNV-25")
 def test_offer_leave_puts_a_leave_button_on_the_answer():
     api = BotAPI()
-    telegram(api).offer_leave("42", 7, 3)
+    telegram(api).offer_leave("42", 7, "📕 Leave #3")
     [(path, fields)] = api.calls
     assert (
         path.endswith("editMessageReplyMarkup") and fields["chat_id"] == "42" and fields["message_id"] == "7"
@@ -453,7 +453,7 @@ def test_offer_leave_puts_a_leave_button_on_the_answer():
     assert json.loads(fields["reply_markup"]) == {
         "inline_keyboard": [[{"text": "📕 Leave #3", "callback_data": "/leave"}]]
     }
-    telegram(BotAPI(editMessageReplyMarkup=OSError("down"))).offer_leave("42", 7, 3)
+    telegram(BotAPI(editMessageReplyMarkup=OSError("down"))).offer_leave("42", 7, "📕 Leave #3")
 
 
 @pytest.mark.spec("INT-1")

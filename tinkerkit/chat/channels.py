@@ -19,7 +19,6 @@ from ..desk import (
     CHAT_SKIP,
     FRESH_ANSWER_BUTTON,
     LEAVE_INTERVIEW_BUTTON,
-    LEAVE_READING_BUTTON,
     NEXT_PAGE_BUTTON,
     SKIP_QUESTION_BUTTON,
     Desk,
@@ -438,15 +437,15 @@ class TelegramChannel(Channel):
         button = {"text": NEXT_PAGE_BUTTON, "callback_data": data}
         return {"reply_markup": json.dumps({"inline_keyboard": [[button]]})}
 
-    def offer_leave(self, chat, shown, number):
+    def offer_leave(self, chat, shown, label):
         try:
-            self.call("editMessageReplyMarkup", chat_id=chat, message_id=shown, **self.leave_button(number))
+            self.call("editMessageReplyMarkup", chat_id=chat, message_id=shown, **self.leave_button(label))
         except OSError, ChannelError:
             pass
 
     @staticmethod
-    def leave_button(number):
-        button = {"text": LEAVE_READING_BUTTON.format(number=number), "callback_data": CHAT_LEAVE}
+    def leave_button(label):
+        button = {"text": label, "callback_data": CHAT_LEAVE}
         return {"reply_markup": json.dumps({"inline_keyboard": [[button]]})}
 
     def offer_answers(self, chat, shown):

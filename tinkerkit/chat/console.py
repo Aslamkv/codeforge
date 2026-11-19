@@ -151,6 +151,9 @@ class Channel:
             self.delete(chat, extra)
         return now
 
+    def show_growing(self, chat, shown, text):
+        return self.show(chat, shown, text)
+
     def count_live(self, chat, shown, **facts):
         pass
 
@@ -172,7 +175,7 @@ class Channel:
     def now_inside(self, chat, mode):
         pass
 
-    def offer_leave(self, chat, shown, number):
+    def offer_leave(self, chat, shown, label):
         pass
 
     def offer_answers(self, chat, shown):
@@ -418,8 +421,10 @@ class ConsoleChannel(Channel):
         return styled("│ ", "accent") + styled(shown, style) + padding + styled(" │", "accent")
 
     def send(self, chat, text):
-        self.screen.print(marked(Markup.ansi(self.said(text))))
-        return self.new_id()
+        sent, text = self.new_id(), self.said(text)
+        self.screen.print(marked(Markup.ansi(text)))
+        self.printed[sent] = {line for line in text.split("\n") if line.strip()}
+        return sent
 
     def edit(self, chat, sent, text):
         self.screen.print(marked(Markup.ansi(self.said(text))))
@@ -437,6 +442,11 @@ class ConsoleChannel(Channel):
             self.show_done(sent, text)
         else:
             self.show_going(sent, text, doing, facts)
+        return [sent]
+
+    def show_growing(self, chat, shown, text):
+        sent = (shown or [None])[0] or self.new_id()
+        self.print_settled(sent, self.said(text).split("\n"))
         return [sent]
 
     @contextlib.contextmanager

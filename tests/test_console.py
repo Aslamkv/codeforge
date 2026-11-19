@@ -71,8 +71,8 @@ class Recorder(Channel):
     def now_inside(self, chat, mode):
         self.log.append(("inside", chat, None, mode))
 
-    def offer_leave(self, chat, shown, number):
-        self.log.append(("leave", chat, shown, number))
+    def offer_leave(self, chat, shown, label):
+        self.log.append(("leave", chat, shown, label))
 
     def offer_answers(self, chat, shown):
         self.log.append(("answers", chat, shown, ""))
@@ -208,6 +208,24 @@ def test_console_prints_only_what_a_done_message_grew_by(monkeypatch):
     console.show("console", shown, "Done\n\nline one\nline two", done=True)
     console.show("console", shown, "Done\n\nline one\nline two", done=True)
     assert out.getvalue().splitlines() == ["Done", "", "line one", "line two"]
+
+
+@pytest.mark.spec("CNV-25")
+def test_console_prints_each_new_line_of_a_growing_message_without_a_doing_line(monkeypatch):
+    console, out = piped_console(monkeypatch)
+    shown = console.show_growing("console", None, "⚙️ #3 calc\nline one")
+    console.show_growing("console", shown, "⚙️ #3 calc\nline one\nline two\nline three")
+    console.show_growing("console", shown, "⚙️ #3 calc\nline one\nline two\nline three")
+    assert out.getvalue().splitlines() == ["⚙️ #3 calc", "line one", "line two", "line three"]
+
+
+@pytest.mark.spec("CNV-25")
+def test_console_grows_a_sent_message_by_its_new_lines_only(monkeypatch):
+    console, out = piped_console(monkeypatch)
+    sent = console.send("console", "⚙️ #3 calc\nline one")
+    console.show_growing("console", [sent], "⚙️ #3 calc\nline one\nline two")
+    console.show_growing("console", [sent], "⚙️ #3 calc\nline one\nline two\nline three")
+    assert out.getvalue().splitlines() == ["⚙️ #3 calc", "line one", "line two", "line three"]
 
 
 def colour_terminal(monkeypatch, columns=10):
@@ -1100,6 +1118,16 @@ def test_console_shows_a_message_without_a_doing_line_in_its_live_line_until_don
     assert sys.stdout.getvalue() == live_shown("⏳ Getting ready")
     done = drawn_after(lambda: console.show("console", shown, "Answer", done=True))
     assert done == block_taken_out(1) + printed_above(f"{MARK}Answer")
+
+
+@pytest.mark.spec("CNV-25")
+def test_console_prints_a_growing_messages_new_lines_above_the_rule_without_a_live_line(monkeypatch, clock):
+    console = live_console(monkeypatch)
+    shown = console.show_growing("console", None, "⚙️ #3 calc\nline one")
+    assert sys.stdout.getvalue() == printed_above(f"{MARK}⚙️ #3 calc\n  line one", rows=2)
+    grew = drawn_after(lambda: console.show_growing("console", shown, "⚙️ #3 calc\nline one\nline two"))
+    assert grew == printed_above("  line two")
+    assert console.live_owner is None
 
 
 @pytest.mark.spec("CNV-6")
