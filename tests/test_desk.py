@@ -39,12 +39,25 @@ from tinkerkit.chat.console import ConsoleChannel, ConsoleScreen
 from tinkerkit.chat.ledger import DONE_NOTE_KEPT_SECONDS, Ledger
 from tinkerkit.chat.markup import Message
 from tinkerkit.chat.reports import Progress, Reporter
-from tinkerkit.chat.shell import Question, first_words, text_of
+from tinkerkit.chat.shell import (
+    CANT_BE_UNDONE,
+    Checked,
+    PlainLine,
+    Question,
+    RootLine,
+    Shell,
+    first_words,
+    text_of,
+)
 from tinkerkit.commands import BY_NAME, COMMANDS, GROUPS, command_of
 from tinkerkit.desk import (
     ALL_FOR_NOW,
+    PAUSE_OUTSIDE,
+    STILL_THINKING,
+    UNDO_OUTSIDE,
     ChatState,
     Desk,
+    InsideInstruction,
     InsideInterview,
     InsideJob,
     InsideReading,
@@ -57,10 +70,12 @@ from tinkerkit.desk import (
     after_word,
     built_project,
     first_lines,
+    last_run_state,
     thread_episodes,
     thread_line,
     welcome,
 )
+from tinkerkit.instructions import INSTRUCTIONS, Instructions, Run
 from tinkerkit.jobs import Queue, Runner, began_at
 from tinkerkit.memory.interview import UNREADABLE, Interview
 from tinkerkit.memory.memories import Questions as KeptQuestions
@@ -291,6 +306,13 @@ def test_a_reply_from_memory_makes_a_remembered_episode():
     assert desk_module.answered_episode(Message("1", "hi"), ["hello"], [])["status"] == "answered"
 
 
+@pytest.mark.spec("REM-1")
+def test_a_reply_naming_routed_lines_keeps_them_as_routed_not_run():
+    episode = desk_module.answered_episode(Message("1", "list my files"), ["/ls"], ["/ls"])
+    assert episode["routed"] == ["/ls"]
+    assert "commands" not in episode
+
+
 @pytest.mark.spec("REM-6")
 def test_a_chat_reply_with_nothing_recalled_keeps_its_prompt(measured_model, fake_ollama):
     remembering("fact", "the person keeps bees", "they keep bees in the garden")
@@ -366,7 +388,8 @@ def test_talk_reply(measured_model, fake_ollama):
     assert route[0]["content"].startswith(
         desk_module.Prompts.CHAT_ROUTE_SYSTEM.format(index=desk_module.chat_index())
     )
-    assert "question 0 → Answer 0." in route[0]["content"] and route[1:] == messages[1:]
+    assert "question 0 → Answer 0." not in route[0]["content"] and route[1:] == messages[1:]
+    assert "question 0 → Answer 0." in messages[0]["content"]
     assert messages[0]["role"] == "system" and desk_module.chat_index() not in messages[0]["content"]
     assert "Earlier in this chat" in messages[0]["content"]
     assert "question 0 → Answer 0." in messages[0]["content"]
@@ -424,7 +447,8 @@ def test_a_named_command_taking_words_gets_a_second_call(measured_model, fake_ol
     Scratchpad.write(chatted_episode(0))
     fake_ollama.reply("`/amend`").reply("/amend handle zero")
     talk.reply(Recorder(), Message("1", "and zero"), state)
-    assert all("question 0 → Answer 0." in system_of(call) for call in fake_ollama.calls[-2:])
+    route, fill = fake_ollama.calls[-2:]
+    assert "question 0 → Answer 0." not in system_of(route) and "question 0 → Answer 0." in system_of(fill)
 
 
 TRAITS_PART = "Who the person is and how they want you to be"
@@ -523,10 +547,9 @@ def test_each_chat_request_writes_one_episode(desk, monkeypatch):
     chat("/clear chat\n/fix the login bug", lambda last: len(Scratchpad.fresh()) == 2)
     answered, commanded = sorted(Scratchpad.fresh(), key=lambda episode: int(episode["id"][1:]))
     assert answered["message"] == "do it for me" and answered["reply"] == "status is fine"
-    assert answered["status"] == "answered" and answered["chat"] == "1" and "commands" not in answered
-    assert (
-        commanded["commands"] == ["/clear chat", "/fix the login bug"] and commanded["status"] == "answered"
-    )
+    assert answered["status"] == "answered" and answered["chat"] == "1" and "routed" not in answered
+    assert commanded["routed"] == ["/clear chat", "/fix the login bug"] and commanded["status"] == "answered"
+    assert "commands" not in commanded
 
 
 def budgeted(monkeypatch, replies):
@@ -736,6 +759,7 @@ def desk(tmp_path, monkeypatch, home_store):
     ran = lambda words, **options: desk.ran.append(words) or f"output of {' '.join(words)}"
     monkeypatch.setattr(desk, "tinker", ran)
     monkeypatch.setattr(desk, "printed", ran)
+    monkeypatch.setattr(desk, "apart", lambda work: work())
     yield desk, channel, script
     desk.stop_task()
     if desk.last_task:
@@ -1329,7 +1353,7 @@ def test_what_waits_for_confirm_is_cancelled_by_anything_else(desk, monkeypatch)
     desk.answer(Message("1", "/clear memory"), channel)
     say(desk, channel, "/confirm")
     wait_until(lambda: ["clear", "memory", "--yes"] in desk.ran)
-    assert desk.decide([(channel, "1")], "confirm", ["confirm"]).startswith("🤷 No plan waits")
+    assert desk.decide([(channel, "1")], "confirm", ["confirm"]).startswith("🤷 Nothing waits")
     assert desk.rename([(channel, "1")], NoWaitingPlan(), ["rename", "x"]).startswith("🤷 No plan waits")
 
 
@@ -1366,11 +1390,6 @@ def test_a_chat_has_one_question_and_a_new_one_cancels_the_one_before(desk, monk
     say(desk, channel, "/confirm")
     wait_until(lambda: ["clear", "runs", "--yes"] in desk.ran)
     assert ["clear", "memory", "--yes"] not in desk.ran and desk.questions.by_chat == {}
-    desk.shell.name(channel, Message("1", "list files"), desk.running_now)
-    say(desk, channel, "/confirm")
-    assert channel.texts()[-1].startswith("⏳ The command is still being worked out")
-    say(desk, channel, "hello")
-    assert desk.questions.waiting(channel, "1").naming
 
 
 @pytest.mark.spec("CNV-11")
@@ -1432,6 +1451,18 @@ def test_a_slash_word_that_names_no_command_is_only_answered(desk, monkeypatch):
     say(desk, channel, "status of my build")
     say(desk, channel, "/status")
     assert heard == ["status of my build", "/status"]
+
+
+@pytest.mark.spec("CNV-3")
+def test_a_first_word_holding_another_slash_is_a_path_and_a_plain_message(desk, monkeypatch):
+    desk, channel, _ = desk
+    heard = []
+    monkeypatch.setattr(
+        desk.talk, "answer", lambda channel, message, *rest, **kwargs: heard.append(message.text)
+    )
+    say(desk, channel, "/tmp/b is a mess")
+    assert heard == ["/tmp/b is a mess"]
+    assert not any("No command" in text for text in channel.texts())
 
 
 @pytest.mark.spec("CNV-11")
@@ -2092,6 +2123,14 @@ def test_a_message_routed_to_none_is_reviewed_and_answered_without_the_commands(
     )
 
 
+@pytest.mark.spec("CNV-18", "REM-6")
+def test_the_route_call_with_nothing_recalled_keeps_its_prompt(measured_model, fake_ollama):
+    fake_ollama.reply("/runs")
+    Talk("task").reply(Recorder(), Message("1", "which projects are there"))
+    system = system_of(fake_ollama.calls[0])
+    assert system == desk_module.Prompts.CHAT_ROUTE_SYSTEM.format(index=desk_module.chat_index())
+
+
 @pytest.mark.spec("CNV-18", "RVW-3")
 def test_a_message_routed_to_a_command_that_takes_words_goes_to_the_fill_call_unreviewed(
     measured_model, fake_ollama, monkeypatch
@@ -2137,6 +2176,34 @@ def test_a_message_routed_to_a_command_without_words_runs_it_at_once(measured_mo
     fake_ollama.reply(routed)
     assert Talk("task").reply(Recorder(), Message("1", "which projects are there")) == "/runs"
     assert len(fake_ollama.calls) == 1
+
+
+@pytest.mark.spec("CNV-18")
+def test_the_route_call_gets_no_thread_and_the_fill_call_does(measured_model, fake_ollama):
+    Scratchpad.write(chatted_episode(0))
+    fake_ollama.reply("/system").reply("/system ram")
+    Talk("task").reply(Recorder(), Message("1", "how much ram is free"))
+    route, fill = fake_ollama.calls
+    assert "question 0" not in str(route["messages"])
+    assert "question 0" in system_of(fill)
+
+
+@pytest.mark.spec("CNV-18")
+@pytest.mark.parametrize("routed", ["/instruct", "instruct clean up"])
+def test_a_message_routed_to_instruct_runs_it_with_the_message_without_a_fill_call(
+    measured_model, fake_ollama, routed
+):
+    fake_ollama.reply(routed)
+    reply = Talk("task").reply(Recorder(), Message("1", "clean up the downloads folder"))
+    assert reply == "/instruct clean up the downloads folder"
+    assert len(fake_ollama.calls) == 1
+
+
+@pytest.mark.spec("CNV-18")
+@pytest.mark.parametrize("line", ["Here is the command:", "free -h", "ls ~/Downloads"])
+def test_a_fill_line_that_is_no_routed_slash_line_is_dropped(measured_model, fake_ollama, line):
+    fake_ollama.reply("/system").reply(f"{line}\n/system ram")
+    assert Talk("task").reply(Recorder(), Message("1", "how much ram is free")) == "/system ram"
 
 
 @pytest.mark.spec("CNV-18")
@@ -2187,26 +2254,10 @@ def test_one_shot_commands(monkeypatch, capsys):
     monkeypatch.setattr(desk_module, "commands_brief", lambda: "cmds")
     monkeypatch.setattr(sys, "stdin", io.StringIO(""))
     assert desk_module.one_shot("chat", "") == "tinker chat needs words after it, e.g. tinker chat hello"
-    assert (
-        desk_module.one_shot("command", "") == "tinker command needs words after it, e.g. tinker command ..."
-    )
     assert desk_module.one_shot("history", "") is None
     assert "nothing shown in the chats yet" in capsys.readouterr().out
     desk_module.one_shot("chat", "hello")
     assert "No model is in use yet" in capsys.readouterr().out
-
-
-@pytest.mark.spec("CNV-22")
-def test_one_shot_command_runs_nothing_without_a_yes(
-    monkeypatch, measured_model, fake_ollama, capsys, tmp_path
-):
-    monkeypatch.setattr(desk_module, "commands_brief", lambda: "cmds")
-    monkeypatch.setattr(sys, "stdin", io.StringIO(""))
-    monkeypatch.chdir(tmp_path)
-    fake_ollama.reply("low: a plain request").reply('{"command": "touch made.txt", "does": "makes a file"}')
-    desk_module.one_shot("command", "make a file")
-    out = capsys.readouterr().out
-    assert "touch made.txt" in out and "Not run:" in out and not (tmp_path / "made.txt").exists()
 
 
 @pytest.mark.spec("CNV-8")
@@ -2364,7 +2415,721 @@ def test_leave_leaves_the_reading_and_plain_messages_go_back_to_the_chat(inside)
     desk.handle(channel, Message("1", "hello"))
     assert asked == ["talk"]
     desk.handle(channel, Message("1", "/leave"))
-    assert channel.texts()[-1] == "📕 **Not inside a reading, the interview or a job**"
+    assert channel.texts()[-1] == "📕 **Not inside a reading, the interview, a job or an instruction**"
+
+
+@pytest.fixture
+def instructed(instruction_desk):
+    desk, channel, _ = instruction_desk
+    desk.handle(channel, Message("1", "/instruct list the big files"))
+    return instruction_desk
+
+
+@pytest.fixture
+def routed_instruction(instruction_desk):
+    desk, channel, _ = instruction_desk
+    desk.replied(channel, Message("1", "list the big files"), "/instruct list the big files")
+    return instruction_desk
+
+
+@pytest.mark.spec("CNV-18")
+def test_a_cancel_of_a_routed_instructions_first_proposal_leaves_it_and_says_nothing_more(routed_instruction):
+    desk, channel, _ = routed_instruction
+    desk.handle(channel, Message("1", "/cancel"))
+    assert "1" not in desk.inside
+    assert "🛠 **Left #1 list the big files**" in channel.texts()
+    assert not [reply for reply in channel.texts() if reply.startswith("words:")]
+
+
+@pytest.mark.spec("CNV-18")
+@pytest.mark.parametrize("word", ["/cancel", "/leave"])
+def test_a_cancel_of_a_routed_instructions_first_proposal_gets_no_other_reply(routed_instruction, word):
+    desk, channel, _ = routed_instruction
+    before = len(channel.texts())
+    desk.handle(channel, Message("1", word))
+    replies = channel.texts()[before:]
+    assert [reply for reply in replies if "Left #1" in reply] == ["🛠 **Left #1 list the big files**"]
+    assert not [reply for reply in replies if reply.startswith("words:")]
+    assert not [reply for reply in replies if "No command" in reply or "Not inside" in reply]
+
+
+@pytest.mark.spec("CNV-18")
+def test_a_cancel_of_a_typed_instructions_first_proposal_stays_inside(instructed):
+    desk, channel, _ = instructed
+    desk.handle(channel, Message("1", "/cancel"))
+    assert isinstance(desk.inside["1"], InsideInstruction)
+    assert "words" not in channel.texts()
+
+
+@pytest.mark.spec("CNV-18")
+def test_a_cancel_of_a_routed_instructions_later_proposal_stays_inside(routed_instruction):
+    desk, channel, _ = routed_instruction
+    desk.handle(channel, Message("1", "only the big ones"))
+    desk.handle(channel, Message("1", "/cancel"))
+    assert isinstance(desk.inside["1"], InsideInstruction)
+    assert "words: list the big files" not in channel.texts()
+
+
+@pytest.fixture
+def instruction_desk(desk, monkeypatch):
+    desk, channel, _ = desk
+    proposed = []
+
+    def propose(shell, channel, message, state, tokens, thread):
+        line = f"echo {len(thread)}"
+        proposed.append((shell.folder, [said["said"] for said in thread]))
+        offered = {"line": line, "asked": message.text, "level": "low", "shown": None, "undo": CANT_BE_UNDONE}
+        return PlainLine(line).offer(shell, channel, message.chat, offered | {"does": "says", "touches": []})
+
+    def answer(channel, message, now, state=None, write=None, on_shown=None, **options):
+        sent = channel.send(message.chat, write(channel, message, "", 300))
+        if on_shown:
+            on_shown([sent])
+
+    monkeypatch.setattr(Shell, "propose", propose)
+    monkeypatch.setattr(desk.talk, "answer", answer)
+    return desk, channel, proposed
+
+
+@pytest.mark.spec("CNV-10")
+def test_a_line_still_being_worked_out_waits_through_a_confirm_and_a_message(instruction_desk, monkeypatch):
+    desk, channel, _ = instruction_desk
+    monkeypatch.setattr(Shell, "propose", lambda *args: "💭 Working out the command")
+    desk.handle(channel, Message("1", "/instruct list files"))
+    say(desk, channel, "/confirm")
+    assert channel.texts()[-1].startswith("⏳ The command is still being worked out")
+    say(desk, channel, "hello")
+    assert desk.questions.waiting(channel, "1").naming
+
+
+@pytest.fixture
+def model_commands(desk, monkeypatch):
+    desk, channel, _ = desk
+    kept = []
+
+    def propose(shell, channel, message, state, tokens, thread):
+        return PlainLine("echo").offer(shell, channel, message.chat, {})
+
+    def answer(channel, message, *args, on_command=None, **options):
+        if on_command:
+            kept.append(on_command)
+
+    monkeypatch.setattr(Shell, "propose", propose)
+    monkeypatch.setattr(desk.talk, "answer", answer)
+    editor_question()
+    desk.interview = Interview()
+    desk.handle(channel, Message("1", "what can you do?"))
+    return desk, channel, kept
+
+
+@pytest.mark.spec("CNV-25")
+def test_a_model_reply_after_the_person_entered_an_instruction_does_not_change_the_mode(model_commands):
+    desk, channel, kept = model_commands
+    desk.handle(channel, Message("1", "/instruct note"))
+    kept[0]("/interact")
+    assert isinstance(desk.inside["1"], InsideInstruction)
+
+
+@pytest.mark.spec("CNV-25")
+def test_a_model_reply_with_the_mode_unchanged_runs_its_command(model_commands):
+    desk, channel, kept = model_commands
+    kept[0]("/interact")
+    assert isinstance(desk.inside["1"], InsideInterview)
+
+
+@pytest.mark.spec("CNV-25")
+def test_each_proposal_inside_an_instruction_gets_run_and_leave_buttons(instructed):
+    desk, channel, _ = instructed
+    desk.handle(channel, Message("1", "only the big ones"))
+    proposals = [
+        sent
+        for kind, _, sent, text in channel.log
+        if kind == "send" and text.startswith("🖥 **I think you meant to do it like this:**")
+    ]
+    offered = [(chat, shown, label) for kind, chat, shown, label in channel.log if kind == "run"]
+    assert offered == [("1", shown, "🚪 Leave #1") for shown in proposals] and len(proposals) == 2
+
+
+@pytest.mark.spec("CNV-25")
+def test_a_refused_line_inside_an_instruction_gets_no_buttons(instructed, monkeypatch):
+    desk, channel, _ = instructed
+    monkeypatch.setattr(
+        Shell,
+        "propose",
+        lambda shell, channel, message, state, tokens, thread: RootLine("sudo ls").offer(
+            shell, channel, message.chat, {}
+        ),
+    )
+    desk.handle(channel, Message("1", "as root"))
+    assert channel.texts()[-1].startswith("⛔ **sudo isn't supported yet:**")
+    assert len([kind for kind, *_ in channel.log if kind == "run"]) == 1
+
+
+@pytest.mark.spec("INS-1", "CNV-25")
+def test_instruct_makes_the_instruction_enters_it_and_proposes_its_request(instructed):
+    desk, channel, proposed = instructed
+    assert Instructions.get(1)["request"] == "list the big files"
+    assert desk.inside["1"].prompt() == "🛠 #1 list the big files › "
+    assert "🛠 **Inside #1 list the big files** · `/leave` leaves it" in channel.texts()
+    assert proposed == [(Path("~").expanduser(), ["request"])]
+    assert channel.texts()[-1].startswith("🖥 **I think you meant to do it like this:**")
+
+
+@pytest.mark.spec("INS-1", "CNV-11")
+def test_instruct_alone_asks_for_what(desk):
+    desk, channel, _ = desk
+    desk.handle(channel, Message("1", "/instruct"))
+    assert channel.texts()[-1].startswith("✍️ **/instruct**") and Instructions.get(1) is None
+
+
+@pytest.mark.spec("INS-2", "CNV-10")
+def test_inside_an_instruction_a_message_is_the_amend_cancelling_the_proposal_quietly(instructed):
+    desk, channel, proposed = instructed
+    desk.handle(channel, Message("1", "only the big ones"))
+    assert [said["said"] for said in Instructions.get(1)["thread"]] == [
+        "request",
+        "proposal",
+        "amend",
+        "proposal",
+    ]
+    assert proposed[-1][1] == ["request", "proposal", "amend"]
+    assert not any("Not run" in text for text in channel.texts())
+    assert desk.questions.waiting(channel, "1").held["line"] == "echo 3"
+
+
+@pytest.mark.spec("CNV-25")
+def test_inside_an_instruction_a_said_command_is_the_amend_not_the_command(instructed):
+    desk, channel, proposed = instructed
+    assert desk_module.said_command("run it") == "/dream run"
+    desk.handle(channel, Message("1", "/confirm"))
+    wait_until(lambda: channel.texts()[-1].startswith("▶️ **Running**"))
+    assert not desk.questions.waiting(channel, "1")
+    desk.handle(channel, Message("1", "run it"))
+    assert {"said": "amend", "text": "run it"} in Instructions.get(1)["thread"]
+    assert proposed[-1][1][-1] == "amend"
+    assert desk.inside["1"].number == 1
+
+
+@pytest.mark.spec("INS-4", "CNV-20")
+def test_a_confirmed_proposal_starts_detached_and_is_recorded_as_running(instructed):
+    desk, channel, proposed = instructed
+    desk.handle(channel, Message("1", "/confirm"))
+    wait_until(lambda: channel.texts()[-1].startswith("▶️ **Running** `echo 1` …"))
+    run = Instructions.get(1)["runs"][-1]
+    assert run["chat"] == "1" and Path(run["folder"]).parent.name == "1"
+    wait_until(lambda: Run.ended(run["folder"]) is not None)
+    assert Run.ended(run["folder"]).code == 0 and Run.ended(run["folder"]).output == "1"
+    assert desk.inside["1"].number == 1
+
+
+@pytest.mark.spec("INS-9", "INS-4")
+def test_a_read_only_line_shaped_like_a_tool_memory_starts_at_once(instructed, monkeypatch):
+    desk, channel, _ = instructed
+
+    def propose(shell, channel, message, state, tokens, thread):
+        offered = {"line": "ls -S", "asked": message.text, "level": "low", "shown": None, "undo": ""}
+        known = ["ls -S /tmp"]
+        return Checked.of("ls -S", shell.folder, known).offer(
+            shell, channel, message.chat, offered | {"does": "lists", "touches": []}
+        )
+
+    monkeypatch.setattr(Shell, "propose", propose)
+    desk.handle(channel, Message("1", "by size"))
+    wait_until(lambda: channel.texts()[-1].startswith("▶️ **Running** `ls -S` …"))
+    assert "▶️ **Running:**\n```\nls -S\n```" in channel.texts()
+    run = Instructions.get(1)["runs"][-1]
+    assert run["line"] == "ls -S" and not desk.questions.waiting(channel, "1")
+    assert Instructions.get(1)["thread"][-1] == {"said": "proposal", "text": "ls -S"}
+
+
+def finished_run(tmp_path, ended=None, output="", pid=0):
+    (run_folder := tmp_path / "run").mkdir()
+    began = began_at(pid) if pid else ""
+    (run_folder / "state").write_text(json.dumps({"pid": pid, "began": began}))
+    (run_folder / "output.log").write_text(output)
+    if ended is not None:
+        (run_folder / "ended").write_text(f"{ended}\n")
+    Instructions.ran(1, run_folder, "1", {"line": "du -sh .", "asked": "how big"})
+    return run_folder
+
+
+@pytest.mark.spec("INS-5", "REM-1")
+def test_an_ended_run_is_posted_once_to_its_chat_said_onto_the_thread_and_kept(instructed, tmp_path):
+    desk, channel, _ = instructed
+    finished_run(tmp_path, ended=0, output="4.0K\t.")
+    desk.say_run_endings()
+    desk.say_run_endings()
+    posted = [text for text in channel.texts() if "du -sh ." in text and "exit" in text]
+    assert len(posted) == 1 and posted[0].startswith(f"✅ `du -sh .` · _exit 0_\n{Shell.folded('4.0K\t.')}")
+    assert Instructions.get(1)["thread"][-1] == {"said": "output", "text": "4.0K\t."}
+    assert Instructions.get(1)["runs"][-1]["posted"] is True
+    [episode] = Scratchpad.fresh()
+    assert (episode["request"], episode["line"], episode["code"]) == ("how big", "du -sh .", 0)
+
+
+@pytest.mark.spec("INS-4")
+def test_a_failed_run_that_needs_a_terminal_is_posted_with_why(instructed, tmp_path):
+    desk, channel, _ = instructed
+    finished_run(tmp_path, ended=1, output="\x1b[?1049h\x1b[>4;mVim: Error reading input")
+    desk.say_run_endings()
+    [posted] = [text for text in channel.texts() if "du -sh ." in text and "exit" in text]
+    assert "Runs have no terminal, so this line can't run here." in posted and "\x1b" not in posted
+    assert "Vim: Error reading input" not in posted
+    assert Instructions.get(1)["thread"][-1] == {"said": "output", "text": "Vim: Error reading input"}
+
+
+@pytest.mark.spec("INS-4")
+def test_a_run_needing_no_terminal_is_posted_without_the_reason(instructed, tmp_path):
+    desk, channel, _ = instructed
+    finished_run(tmp_path, ended=1, output="\x1b[31mno\x1b[0m")
+    desk.say_run_endings()
+    assert not any("no terminal" in text for text in channel.texts())
+
+
+def tool_memories():
+    from tinkerkit.memory.memories import Memories
+    from tinkerkit.ranking import Retriever
+
+    return [memory for memory in Memories(Retriever(None)).living() if memory["kind"] == "tool"]
+
+
+@pytest.mark.spec("INS-8")
+def test_an_ended_run_confirmed_after_an_amend_is_kept_as_a_tool_memory(instructed, tmp_path):
+    desk, channel, _ = instructed
+    desk.handle(channel, Message("1", "only the big ones"))
+    finished_run(tmp_path, ended=0, output="4.0K\t.")
+    desk.say_run_endings()
+    [episode] = Scratchpad.fresh()
+    [memory] = tool_memories()
+    assert (memory["gist"], memory["text"], memory["sources"]) == (
+        "list the big files\nonly the big ones",
+        "du -sh .",
+        [episode["id"]],
+    )
+
+
+@pytest.mark.spec("INS-8")
+def test_an_ended_run_confirmed_without_an_amend_is_kept_under_what_was_asked(instructed, tmp_path):
+    desk, channel, _ = instructed
+    finished_run(tmp_path, ended=0, output="4.0K\t.")
+    desk.say_run_endings()
+    [memory] = tool_memories()
+    assert (memory["gist"], memory["text"]) == ("how big", "du -sh .")
+
+
+@pytest.mark.spec("INS-8")
+def test_a_run_ending_with_a_nonzero_exit_is_not_kept_as_a_tool_memory(instructed, tmp_path):
+    desk, channel, _ = instructed
+    finished_run(tmp_path, ended=1, output="du: no such file")
+    desk.say_run_endings()
+    assert tool_memories() == []
+
+
+@pytest.mark.spec("INS-8", "INS-9")
+def test_a_run_started_at_once_is_not_kept_as_a_tool_memory(instructed, tmp_path):
+    desk, channel, _ = instructed
+    (run_folder := tmp_path / "run").mkdir()
+    (run_folder / "state").write_text(json.dumps({"pid": 0, "began": ""}))
+    (run_folder / "ended").write_text("0\n")
+    Instructions.ran(1, run_folder, "1", {"line": "du -sh .", "asked": "how big", "at_once": True})
+    desk.say_run_endings()
+    assert Instructions.get(1)["runs"][-1]["at_once"] is True
+    assert tool_memories() == []
+
+
+@pytest.mark.spec("INS-8")
+def test_an_ended_undo_run_is_not_kept_as_a_tool_memory(instructed, tmp_path):
+    desk, channel, _ = instructed
+    desk.handle(channel, Message("1", "only the big ones"))
+    (run_folder := tmp_path / "run").mkdir()
+    (run_folder / "state").write_text(json.dumps({"pid": 0, "began": ""}))
+    (run_folder / "ended").write_text("0\n")
+    Instructions.ran(1, run_folder, "1", {"line": "mv b a", "undoes": "elsewhere"})
+    desk.say_run_endings()
+    assert tool_memories() == []
+
+
+@pytest.mark.spec("INS-5")
+def test_a_run_gone_without_an_exit_code_is_posted_as_unknown(instructed, tmp_path):
+    desk, channel, _ = instructed
+    finished_run(tmp_path)
+    desk.say_run_endings()
+    assert channel.texts()[-1].startswith("❌ `du -sh .` · _exit unknown_\n_(no output)_")
+
+
+@pytest.mark.spec("INS-6")
+def test_a_stopped_run_gone_without_an_exit_code_is_posted_as_stopped(instructed, tmp_path):
+    desk, channel, _ = instructed
+    (finished_run(tmp_path) / "stopped").write_text("")
+    desk.say_run_endings()
+    assert channel.texts()[-1].startswith("⏹ `du -sh .` · _stopped_\n_(no output)_")
+
+
+@pytest.mark.spec("INS-5")
+def test_a_still_live_run_is_not_posted(instructed, tmp_path):
+    desk, channel, _ = instructed
+    finished_run(tmp_path, pid=os.getpid())
+    shown = list(channel.texts())
+    desk.say_run_endings()
+    assert channel.texts() == shown and Instructions.get(1)["runs"][-1]["posted"] is False
+
+
+@pytest.mark.spec("INS-1", "INS-4")
+def test_the_next_proposal_runs_in_the_folder_the_last_run_ended_in(instructed, tmp_path):
+    desk, channel, proposed = instructed
+    desk.handle(channel, Message("1", "/confirm"))
+    wait_until(lambda: Instructions.get(1)["runs"])
+    run_folder = Path(Instructions.get(1)["runs"][-1]["folder"])
+    wait_until(lambda: Run.ended(run_folder) is not None)
+    (run_folder / "folder").write_text(f"{tmp_path}\n")
+    desk.handle(channel, Message("1", "and the small ones"))
+    assert proposed[-1] == (tmp_path, ["request", "proposal", "amend"])
+
+
+@pytest.mark.spec("INS-4")
+def test_a_run_whose_folder_is_gone_says_so(instructed, tmp_path, monkeypatch):
+    desk, channel, _ = instructed
+    monkeypatch.setattr(Instructions, "working_folder", staticmethod(lambda number: str(tmp_path / "gone")))
+    desk.handle(channel, Message("1", "more"))
+    desk.handle(channel, Message("1", "/confirm"))
+    wait_until(lambda: "Could not start" in channel.texts()[-1])
+    assert Instructions.get(1)["runs"] == []
+
+
+@pytest.mark.spec("INS-1")
+def test_instructions_shows_each_last_runs_state(instructed, tmp_path):
+    desk, channel, _ = instructed
+    assert last_run_state(Instructions.get(1)) == "new"
+    (run_folder := tmp_path / "run").mkdir()
+    (run_folder / "state").write_text(json.dumps({"pid": os.getpid(), "began": began_at(os.getpid())}))
+    Instructions.ran(1, run_folder, "1", {"line": "ls"})
+    assert last_run_state(Instructions.get(1)) == "running"
+    (run_folder / "state").write_text(json.dumps({"pid": 0, "began": ""}))
+    assert last_run_state(Instructions.get(1)) == "unknown"
+    (run_folder / "ended").write_text("2\n")
+    assert last_run_state(Instructions.get(1)) == "exit 2"
+
+
+@pytest.mark.spec("INS-6")
+def test_a_live_run_with_the_paused_mark_is_paused(instructed, tmp_path):
+    run_folder = finished_run(tmp_path, pid=os.getpid())
+    (run_folder / "paused").write_text("")
+    assert last_run_state(Instructions.get(1)) == "paused"
+    (run_folder / "ended").write_text("0\n")
+    assert last_run_state(Instructions.get(1)) == "exit 0"
+
+
+@pytest.mark.spec("INS-6")
+def test_jobs_without_live_runs_is_the_jobs_listing_alone(instructed, tmp_path):
+    desk, channel, _ = instructed
+    finished_run(tmp_path, ended=0)
+    assert desk.answer(Message("1", "/jobs"), channel) == desk.by_table(channel, "1", ["jobs"])
+
+
+@pytest.mark.spec("INS-6")
+def test_jobs_lists_each_live_run_after_the_jobs(instructed, tmp_path):
+    desk, channel, _ = instructed
+    run_folder = finished_run(tmp_path, pid=os.getpid())
+    listing = desk.by_table(channel, "1", ["jobs"])
+    running = desk.answer(Message("1", "/jobs"), channel)
+    (run_folder / "paused").write_text("")
+    paused = desk.answer(Message("1", "/jobs"), channel)
+    assert running.startswith(listing) and paused.startswith(listing)
+    assert re.search(r"#1 list the big files running (\d+h )?(\d+m )?\d+s", running[len(listing) :])
+    assert re.search(r"#1 list the big files paused (\d+h )?(\d+m )?\d+s", paused[len(listing) :])
+
+
+@pytest.fixture
+def signalled(monkeypatch):
+    sent = []
+
+    def signal_on(name, live):
+        return staticmethod(lambda run_folder: sent.append((name, Path(run_folder).name)) or live)
+
+    def live(answer):
+        for name in ("stop", "pause", "go_on"):
+            monkeypatch.setattr(Run, name, signal_on(name, answer))
+        return sent
+
+    return live
+
+
+@pytest.mark.spec("INS-6")
+@pytest.mark.parametrize(
+    "command,signal,said",
+    [
+        ("/stop", "stop", "⏹ **Stopping** `du -sh .`"),
+        ("/pause", "pause", "⏸ **Paused** `du -sh .` · `/resume` goes on"),
+        ("/resume", "go_on", "▶️ **Going on** `du -sh .`"),
+    ],
+)
+def test_inside_an_instruction_run_control_acts_on_its_last_run(
+    instructed, tmp_path, signalled, command, signal, said
+):
+    desk, channel, _ = instructed
+    finished_run(tmp_path, pid=os.getpid())
+    sent = signalled(True)
+    assert desk.answer(Message("1", command), channel) == said
+    assert sent == [(signal, "run")]
+
+
+@pytest.mark.spec("INS-6")
+@pytest.mark.parametrize("command", ["/stop", "/pause"])
+def test_stop_or_pause_of_a_run_not_live_says_it_has_ended(instructed, tmp_path, signalled, command):
+    desk, channel, _ = instructed
+    finished_run(tmp_path, ended=0)
+    signalled(False)
+    assert desk.answer(Message("1", command), channel) == "🤷 `du -sh .` has ended"
+
+
+@pytest.mark.spec("INS-6")
+@pytest.mark.parametrize("command", ["/stop", "/pause", "/resume"])
+def test_run_control_inside_an_instruction_without_a_run_says_so(instructed, command):
+    desk, channel, _ = instructed
+    assert desk.answer(Message("1", command), channel) == f"🤷 **No run to {command[1:]}** in #1"
+
+
+@pytest.mark.spec("INS-6")
+def test_resume_of_a_run_not_live_offers_its_line_and_runs_it_on_confirm(
+    instructed, tmp_path, signalled, monkeypatch
+):
+    desk, channel, _ = instructed
+    finished_run(tmp_path, ended=1)
+    signalled(False)
+    started = []
+    monkeypatch.setattr(
+        Run,
+        "start",
+        staticmethod(lambda number, line, folder, touches: started.append(line) or tmp_path / "again"),
+    )
+    offered = desk.answer(Message("1", "/resume"), channel)
+    assert (
+        offered.startswith("🖥 **I think you meant to do it like this:**\n")
+        and "du -sh ." in offered
+        and not started
+    )
+    assert desk.questions.waiting(channel, "1").held["line"] == "du -sh ."
+    desk.handle(channel, Message("1", "/confirm"))
+    wait_until(lambda: started == ["du -sh ."])
+
+
+@pytest.mark.spec("INS-6")
+def test_pause_outside_an_instruction_says_it_works_inside_one(desk):
+    desk, channel, _ = desk
+    assert desk.answer(Message("1", "/pause"), channel) == PAUSE_OUTSIDE
+
+
+def undoable_run(
+    tmp_path, name, line, undo, restores=None, irreversible=False, lost_backups=False, pid=0, ended=0
+):
+    (run_folder := tmp_path / name).mkdir()
+    began = began_at(pid) if pid else ""
+    (run_folder / "state").write_text(json.dumps({"pid": pid, "began": began}))
+    (run_folder / "output.log").write_text("")
+    if ended is not None:
+        (run_folder / "ended").write_text(f"{ended}\n")
+    (run_folder / "backups").write_text(
+        json.dumps({"restores": restores or {}, "irreversible": lost_backups})
+    )
+    proposed = {"line": line, "asked": "tidy", "undo": undo, "irreversible": irreversible}
+    Instructions.ran(1, run_folder, "1", proposed)
+    return run_folder
+
+
+@pytest.fixture
+def undoing(instructed, tmp_path, monkeypatch):
+    restored, started = [], []
+    monkeypatch.setattr(
+        Run, "restore", staticmethod(lambda run_folder: restored.append(Path(run_folder).name))
+    )
+    monkeypatch.setattr(
+        Run,
+        "start",
+        staticmethod(lambda number, line, folder, touches: started.append(line) or tmp_path / "undo-run"),
+    )
+    return instructed, restored, started
+
+
+@pytest.mark.spec("INS-7")
+def test_undo_outside_an_instruction_says_it_works_inside_one(desk):
+    desk, channel, _ = desk
+    assert desk.answer(Message("1", "/undo"), channel) == UNDO_OUTSIDE
+    assert UNDO_OUTSIDE == "🛠 `/undo` works inside an instruction (`/instructions #N` enters one)"
+
+
+@pytest.mark.spec("INS-7")
+def test_undo_with_no_run_says_there_is_nothing_to_undo(instructed):
+    desk, channel, _ = instructed
+    assert desk.answer(Message("1", "/undo"), channel) == "🤷 **Nothing to undo** in #1"
+
+
+@pytest.mark.spec("INS-7")
+@pytest.mark.parametrize("irreversible,lost_backups", [(True, False), (False, True)])
+def test_undo_of_an_irreversible_run_says_it_cant_be_undone(undoing, tmp_path, irreversible, lost_backups):
+    (desk, channel, _), restored, started = undoing
+    undo = CANT_BE_UNDONE if irreversible else "rm b"
+    undoable_run(tmp_path, "run", "mv a b", undo, irreversible=irreversible, lost_backups=lost_backups)
+    waiting = desk.questions.waiting(channel, "1")
+    assert desk.answer(Message("1", "/undo"), channel) == "⚠️ `mv a b` can't be undone"
+    assert desk.questions.waiting(channel, "1") is waiting and not restored
+
+
+@pytest.mark.spec("INS-7")
+def test_undo_of_a_run_the_model_cant_undo_previews_its_backups_with_no_undo_line(undoing, tmp_path):
+    (desk, channel, _), restored, started = undoing
+    undoable_run(tmp_path, "run", "mv a b", CANT_BE_UNDONE, {str(tmp_path / "a"): "backup/0"})
+    preview = desk.answer(Message("1", "/undo"), channel)
+    assert f"`{tmp_path / 'a'}`" in preview and "/confirm" in preview
+    assert desk.questions.waiting(channel, "1").held["line"] == ""
+    assert not restored and not started
+
+
+@pytest.mark.spec("INS-7")
+def test_undo_of_a_run_the_model_cant_undo_with_no_backups_has_nothing_to_undo(undoing, tmp_path):
+    (desk, channel, _), restored, started = undoing
+    undoable_run(tmp_path, "run", "mv a b", CANT_BE_UNDONE)
+    waiting = desk.questions.waiting(channel, "1")
+    assert desk.answer(Message("1", "/undo"), channel) == "🤷 **Nothing to undo** in #1"
+    assert desk.questions.waiting(channel, "1") is waiting and not restored
+
+
+@pytest.mark.spec("INS-7")
+def test_undo_passes_a_newer_run_with_nothing_to_undo_and_previews_the_older_one(undoing, tmp_path):
+    (desk, channel, _), restored, started = undoing
+    undoable_run(tmp_path, "first", "touch a", "rm a")
+    undoable_run(tmp_path, "second", "mv a b", CANT_BE_UNDONE)
+    preview = desk.answer(Message("1", "/undo"), channel)
+    assert "↩️ **Undo** `touch a`?" in preview
+    assert desk.questions.waiting(channel, "1").held["line"] == "rm a"
+
+
+@pytest.mark.spec("INS-7")
+def test_undo_after_a_refused_irreversible_run_previews_the_older_one(undoing, tmp_path):
+    (desk, channel, _), restored, started = undoing
+    undoable_run(tmp_path, "first", "touch a", "rm a")
+    undoable_run(tmp_path, "second", "mv a b", "rm b", lost_backups=True)
+    assert desk.answer(Message("1", "/undo"), channel) == "⚠️ `mv a b` can't be undone"
+    preview = desk.answer(Message("1", "/undo"), channel)
+    assert "↩️ **Undo** `touch a`?" in preview
+    assert desk.questions.waiting(channel, "1").held["line"] == "rm a"
+
+
+@pytest.mark.spec("INS-7")
+def test_undo_previews_the_backups_marking_overwritten_ones_and_the_undo_line_then_waits(undoing, tmp_path):
+    (desk, channel, _), restored, started = undoing
+    (kept := tmp_path / "kept.txt").write_text("same")
+    (changed := tmp_path / "changed.txt").write_text("new")
+    restores = {str(kept): "backup/0", str(changed): "backup/1"}
+    run_folder = undoable_run(tmp_path, "run", "touch kept.txt changed.txt", "rm made", restores)
+    since = (run_folder / "ended").stat().st_mtime
+    os.utime(kept, (since - 100, since - 100))
+    os.utime(changed, (since + 100, since + 100))
+    preview = desk.answer(Message("1", "/undo"), channel)
+    assert f"`{kept}`" in preview and f"`{kept}` (overwritten" not in preview
+    assert f"`{changed}` (overwritten: changed since the run)" in preview
+    assert "`rm made`" in preview and "/confirm" in preview
+    assert not restored and not started
+    assert desk.questions.waiting(channel, "1").held["line"] == "rm made"
+
+
+@pytest.mark.spec("INS-7")
+def test_confirmed_undo_restores_marks_the_run_undone_and_starts_the_undo_line(undoing, tmp_path):
+    (desk, channel, _), restored, started = undoing
+    undoable_run(tmp_path, "run", "touch made", "rm made")
+    desk.answer(Message("1", "/undo"), channel)
+    desk.handle(channel, Message("1", "/confirm"))
+    wait_until(lambda: started == ["rm made"])
+    assert restored == ["run"]
+    runs = Instructions.get(1)["runs"]
+    assert runs[0]["undone"] and runs[-1]["line"] == "rm made"
+
+
+@pytest.mark.spec("INS-7")
+def test_undo_is_a_stack_of_the_runs_not_undone_yet(undoing, tmp_path):
+    (desk, channel, _), restored, started = undoing
+    undoable_run(tmp_path, "first", "cp a b", "", {str(tmp_path / "b"): "backup/0"})
+    undoable_run(tmp_path, "second", "cp c d", "", {str(tmp_path / "d"): "backup/0"})
+    for line in ("cp c d", "cp a b"):
+        desk.answer(Message("1", "/undo"), channel)
+        desk.handle(channel, Message("1", "/confirm"))
+        wait_until(lambda undone=f"↩️ **Undone** `{line}`": undone in "".join(channel.texts()[-1:]))
+    assert restored == ["second", "first"] and not started
+    assert desk.answer(Message("1", "/undo"), channel) == "🤷 **Nothing to undo** in #1"
+
+
+@pytest.mark.spec("INS-7")
+def test_a_further_undo_skips_the_undo_lines_run_and_reaches_the_older_run(undoing, tmp_path):
+    (desk, channel, _), restored, started = undoing
+    undoable_run(tmp_path, "first", "touch a", "rm a")
+    undoable_run(tmp_path, "second", "touch b", "rm b")
+    (undo_run := tmp_path / "undo-run").mkdir()
+    (undo_run / "state").write_text(json.dumps({"pid": 0, "began": ""}))
+    (undo_run / "ended").write_text("0\n")
+    desk.answer(Message("1", "/undo"), channel)
+    desk.handle(channel, Message("1", "/confirm"))
+    wait_until(lambda: Instructions.get(1)["runs"][-1]["line"] == "rm b")
+    preview = desk.answer(Message("1", "/undo"), channel)
+    assert "↩️ **Undo** `touch a`?" in preview
+    assert desk.questions.waiting(channel, "1").held["line"] == "rm a"
+
+
+@pytest.mark.spec("INS-7")
+def test_an_undo_with_no_undo_line_logs_no_empty_proposal(undoing, tmp_path):
+    (desk, channel, _), restored, started = undoing
+    undoable_run(tmp_path, "run", "cp a b", "", {str(tmp_path / "b"): "backup/0"})
+    desk.answer(Message("1", "/undo"), channel)
+    thread = Instructions.get(1)["thread"]
+    assert {"said": "proposal", "text": ""} not in thread
+
+
+@pytest.mark.spec("INS-7")
+def test_an_undo_with_an_undo_line_logs_it_as_a_proposal(undoing, tmp_path):
+    (desk, channel, _), restored, started = undoing
+    undoable_run(tmp_path, "run", "touch made", "rm made")
+    desk.answer(Message("1", "/undo"), channel)
+    assert Instructions.get(1)["thread"][-1] == {"said": "proposal", "text": "rm made"}
+
+
+@pytest.mark.spec("INS-7")
+def test_undo_stops_a_live_run_first(undoing, tmp_path, signalled):
+    (desk, channel, _), restored, started = undoing
+    undoable_run(tmp_path, "run", "sleep 100", "rm made", pid=os.getpid(), ended=None)
+    sent = signalled(True)
+    preview = desk.answer(Message("1", "/undo"), channel)
+    assert sent == [("stop", "run")] and "`rm made`" in preview
+
+
+@pytest.mark.spec("INS-6")
+def test_stop_and_resume_outside_an_instruction_act_on_jobs(instructed):
+    desk, channel, _ = instructed
+    desk.handle(channel, Message("1", "/leave"))
+    assert desk.answer(Message("1", "/stop"), channel) == "💤 No job is running."
+    assert desk.answer(Message("1", "/resume"), channel) == "🤷 No job is stopped (jobs lists them)."
+
+
+@pytest.mark.spec("INS-1")
+def test_instructions_lists_enters_by_number_and_an_unknown_one_is_an_error(instructed):
+    desk, channel, _ = instructed
+    desk.handle(channel, Message("1", "/leave"))
+    assert channel.texts()[-1] == "🛠 **Left #1 list the big files**" and desk.inside == {}
+    desk.handle(channel, Message("1", "/instructions"))
+    assert "#1 list the big files" in channel.texts()[-1]
+    desk.handle(channel, Message("1", "/instructions #1"))
+    assert desk.inside["1"].number == 1
+    desk.handle(channel, Message("1", "/instructions #7"))
+    assert channel.texts()[-1] == "🛠 **No instruction #7** (`/instructions` lists them)"
+
+
+@pytest.mark.spec("CNV-25")
+def test_an_instruction_gone_is_left_instead_of_proposed(instructed, monkeypatch):
+    desk, channel, proposed = instructed
+    chatted = []
+    monkeypatch.setattr(
+        desk.talk, "answer", lambda channel, message, *rest, **options: chatted.append(message.text)
+    )
+    INSTRUCTIONS.delete(1)
+    desk.handle(channel, Message("1", "only the big ones"))
+    assert desk.inside == {} and len(proposed) == 1 and chatted == ["only the big ones"]
 
 
 @pytest.mark.spec("CNV-25")
@@ -2454,14 +3219,15 @@ def interviewing(desk):
     desk.interview = Interview()
     asked = []
     desk.talk.answer = lambda channel, message, *rest, **options: asked.append("talk")
-    return desk, channel, asked, desk.interviewed(channel, "1")
+    desk.interviewed(channel, "1")
+    return desk, channel, asked, channel.texts()[-1]
 
 
 @pytest.mark.spec("CNV-25", "INT-1")
 def test_entering_the_interview_says_how_to_leave_then_shows_the_next_question(interviewing):
     desk, channel, _, entered = interviewing
     assert entered == f"{ENTERED}\n\n{RUST_OPENING}"
-    assert channel.log[-1] == ("inside", "1", None, desk.inside["1"])
+    assert ("inside", "1", None, desk.inside["1"]) in channel.log
     assert desk.inside["1"].prompt() == "💬 interact › "
 
 
@@ -2472,6 +3238,7 @@ def test_a_desk_opened_interviewing_shows_the_first_question_after_the_status(mo
     rust_question()
     desk = Desk([ConsoleChannel()], Path.cwd(), interview=Interview(), interviewing=True)
     monkeypatch.setattr(desk.talk, "warm", lambda: None)
+    monkeypatch.setattr(desk, "apart", lambda work: work())
     desk.run()
     shown = terminal.getvalue()
     assert shown.index("idle") < shown.index("When do you write Rust?")
@@ -2522,8 +3289,9 @@ def test_nothing_left_to_ask_offers_no_answer_buttons(interviewing):
     desk, channel, _, _ = interviewing
     for question in KeptQuestions().pending():
         KeptQuestions().answer(question["id"], "done")
+    before = len(channel.log)
     desk.handle(channel, Message("1", "/skip"))
-    assert not [entry for entry in channel.log if entry[0] == "answers"]
+    assert not [entry for entry in channel.log[before:] if entry[0] == "answers"]
 
 
 @pytest.mark.spec("CNV-25")
@@ -2600,6 +3368,130 @@ def test_leave_leaves_the_interview(interviewing):
     assert asked == ["talk"]
 
 
+class SlowInterview(Interview):
+    def __init__(self):
+        super().__init__()
+        self.turning, self.go_on = threading.Event(), threading.Event()
+
+    def turn(self, chat, now=None, say=""):
+        self.turning.set()
+        self.go_on.wait(5)
+        return super().turn(chat, now, say)
+
+
+@pytest.mark.spec("CNV-25", "INT-1", "INT-2")
+def test_leave_while_the_interview_works_out_its_first_question_leaves_at_once(desk):
+    desk, channel, _ = desk
+    rust_question()
+    desk.interview = SlowInterview()
+    entering = threading.Thread(target=desk.handle, args=(channel, Message("1", "/interact")))
+    entering.start()
+    assert desk.interview.turning.wait(5)
+    desk.handle(channel, Message("1", "/leave"))
+    assert channel.texts()[-1] == "💬 **Left the interview**" and desk.inside == {}
+    desk.interview.go_on.set()
+    entering.join(5)
+    assert desk.inside == {} and channel.texts()[-1] == "💬 **Left the interview**"
+
+
+def turns_apart(desk):
+    threads = []
+
+    def apart(work):
+        threads.append(threading.Thread(target=work, daemon=True))
+        threads[-1].start()
+
+    desk.apart = apart
+    return threads
+
+
+def all_joined(threads):
+    for thread in threads:
+        thread.join(5)
+    return not any(thread.is_alive() for thread in threads)
+
+
+@pytest.mark.spec("INT-1")
+def test_a_message_while_the_interview_works_out_a_turn_is_told_to_wait(interviewing):
+    desk, channel, asked, _ = interviewing
+    desk.interview = SlowInterview()
+    desk.now_in(channel, "1", InsideInterview(desk.interview))
+    threads = turns_apart(desk)
+    desk.handle(channel, Message("1", "/skip"))
+    assert desk.interview.turning.wait(5)
+    desk.handle(channel, Message("1", "hello"))
+    assert channel.texts()[-1] == STILL_THINKING and asked == []
+    desk.interview.go_on.set()
+    assert all_joined(threads)
+    assert channel.texts().count(STILL_THINKING) == 1 and channel.texts()[-1] != STILL_THINKING
+
+
+@pytest.mark.spec("INT-1")
+def test_a_command_while_the_interview_works_out_a_turn_is_answered_at_once(interviewing):
+    desk, channel, _, _ = interviewing
+    desk.interview = SlowInterview()
+    desk.now_in(channel, "1", InsideInterview(desk.interview))
+    threads = turns_apart(desk)
+    desk.handle(channel, Message("1", "/skip"))
+    assert desk.interview.turning.wait(5)
+    desk.handle(channel, Message("1", "/read list"))
+    assert desk.ran[-1] == ["read", "list"]
+    desk.interview.go_on.set()
+    assert all_joined(threads)
+
+
+@pytest.mark.spec("INT-1")
+def test_a_turn_finished_after_leaving_the_interview_is_dropped(desk):
+    desk, channel, _ = desk
+    rust_question()
+    desk.interview = SlowInterview()
+    threads = turns_apart(desk)
+    desk.handle(channel, Message("1", "/interact"))
+    assert desk.interview.turning.wait(5)
+    desk.handle(channel, Message("1", "/leave"))
+    desk.interview.go_on.set()
+    assert all_joined(threads)
+    assert channel.texts()[-1] == "💬 **Left the interview**" and desk.inside == {}
+    assert not any("When do you write Rust?" in text for text in channel.texts())
+
+
+class FailingInterview(SlowInterview):
+    def turn(self, chat, now=None, say=""):
+        from tinkerkit.model.models import OllamaError
+
+        self.turning.set()
+        self.go_on.wait(5)
+        raise OllamaError("runner failed\nwith details")
+
+
+@pytest.mark.spec("INT-1")
+def test_a_failed_interview_turn_says_so_and_leaves(desk):
+    desk, channel, _ = desk
+    rust_question()
+    desk.interview = FailingInterview()
+    desk.interview.go_on.set()
+    threads = turns_apart(desk)
+    desk.handle(channel, Message("1", "/interact"))
+    assert all_joined(threads)
+    assert channel.texts()[-1] == "⚠️ **The model did not answer:** runner failed with details"
+    assert desk.inside == {} and desk.turning == {}
+
+
+@pytest.mark.spec("INT-1")
+def test_a_turn_failed_after_leaving_the_interview_says_nothing(desk):
+    desk, channel, _ = desk
+    rust_question()
+    desk.interview = FailingInterview()
+    threads = turns_apart(desk)
+    desk.handle(channel, Message("1", "/interact"))
+    assert desk.interview.turning.wait(5)
+    desk.handle(channel, Message("1", "/leave"))
+    desk.interview.go_on.set()
+    assert all_joined(threads)
+    assert channel.texts()[-1] == "💬 **Left the interview**" and desk.inside == {}
+    assert not any("did not answer" in text for text in channel.texts())
+
+
 @pytest.mark.spec("CNV-25")
 def test_entering_the_interview_leaves_a_reading(inside):
     desk, channel, _ = inside
@@ -2617,8 +3509,8 @@ def test_entering_the_interview_takes_its_turn_once(inside, monkeypatch):
     turns = []
     taken = Interview.turn
     monkeypatch.setattr(Interview, "turn", lambda self, chat: turns.append(chat) or taken(self, chat))
-    entered = desk.interviewed(channel, "1")
-    assert turns == ["1"] and "Which editor do you use?" in entered
+    desk.interviewed(channel, "1")
+    assert turns == ["1"] and "Which editor do you use?" in channel.texts()[-1]
 
 
 @pytest.mark.spec("CNV-25")
@@ -2904,10 +3796,22 @@ def test_history_pages_end_with_the_shared_next_page_line(monkeypatch):
     monkeypatch.setattr(
         desk_module.Ledger,
         "page",
-        lambda page: ([], 3) if page > 3 else ([{"number": 1, "time": "2026-11-12 10:00", "text": "hi"}], 3),
+        lambda page: ([{"number": 1, "time": "2026-11-12 10:00", "text": "hi"}], 3),
     )
     assert next_page_words(desk_module.history_text(["2"])) == "history 3"
     assert next_page_words(desk_module.history_text(["3"])) is None
+
+
+@pytest.mark.spec("SET-11")
+def test_history_past_the_last_page_heads_the_last_page(monkeypatch):
+    monkeypatch.setattr(
+        desk_module.Ledger,
+        "page",
+        lambda page: ([{"number": 21, "time": "2026-11-12 10:00", "text": "hi"}], 3),
+    )
+    text = desk_module.history_text(["5"])
+    assert "page 3 of 3" in text
+    assert next_page_words(text) is None
 
 
 @pytest.mark.spec("ARCH-2")
@@ -2932,3 +3836,17 @@ def test_a_direct_tinker_run_shares_the_home(tinker_home, monkeypatch):
     desk_module.help_text()
     assert [env["TINKER_HOME"] for env in ran] == [str(tinker_home)] * 2
     assert all(env["NO_COLOR"] == "1" for env in ran)
+
+
+def test_help_text_does_not_pass_on_the_runner_job(tinker_home, monkeypatch):
+    ran = []
+    monkeypatch.setattr(
+        subprocess,
+        "run",
+        lambda command, **options: (
+            ran.append(options["env"]) or subprocess.CompletedProcess(command, 0, "", "")
+        ),
+    )
+    monkeypatch.setenv("TINKER_RUNNER_JOB", "7")
+    desk_module.help_text()
+    assert "TINKER_RUNNER_JOB" not in ran[0]

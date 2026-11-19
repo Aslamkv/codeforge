@@ -14,12 +14,14 @@ lazy import urllib.parse
 lazy from pathlib import Path
 
 from ..desk import (
+    CHAT_CONFIRM,
     CHAT_FRESH,
     CHAT_LEAVE,
     CHAT_SKIP,
     FRESH_ANSWER_BUTTON,
     LEAVE_INTERVIEW_BUTTON,
     NEXT_PAGE_BUTTON,
+    RUN_BUTTON,
     SKIP_QUESTION_BUTTON,
     Desk,
     NoInterview,
@@ -459,6 +461,20 @@ class TelegramChannel(Channel):
         moves = [
             {"text": SKIP_QUESTION_BUTTON, "callback_data": CHAT_SKIP},
             {"text": LEAVE_INTERVIEW_BUTTON, "callback_data": CHAT_LEAVE},
+        ]
+        return {"reply_markup": json.dumps({"inline_keyboard": [moves]})}
+
+    def offer_run(self, chat, shown, label):
+        try:
+            self.call("editMessageReplyMarkup", chat_id=chat, message_id=shown, **self.run_buttons(label))
+        except OSError, ChannelError:
+            pass
+
+    @staticmethod
+    def run_buttons(label):
+        moves = [
+            {"text": RUN_BUTTON, "callback_data": CHAT_CONFIRM},
+            {"text": label, "callback_data": CHAT_LEAVE},
         ]
         return {"reply_markup": json.dumps({"inline_keyboard": [moves]})}
 

@@ -19,6 +19,7 @@ from tinkerkit.desk import Desk
 from tinkerkit.jobs import (
     JOB_OUTPUT_LINES,
     JOBS,
+    RUNNER_JOB_ENV,
     Jobs,
     Queue,
     Runner,
@@ -27,6 +28,7 @@ from tinkerkit.jobs import (
     calls_log,
     is_job,
     journaled,
+    tinker_environment,
     today,
 )
 from tinkerkit.knowledge.curriculum import SlotLearner
@@ -103,7 +105,6 @@ def test_long_commands_are_jobs_and_the_rest_are_not():
         ["model", "calibrate", "qwen3"],
         ["ask", "status", "of", "python"],
         ["chat", "hello"],
-        ["command", "list", "files"],
         ["dream", "run"],
     ):
         assert is_job(argv), argv
@@ -1195,3 +1196,9 @@ def test_a_started_tinker_process_shares_the_home(tinker_home, monkeypatch):
     monkeypatch.delenv("TINKER_HOME")
     jobs.tinker_process(["status"])
     assert started[0]["TINKER_HOME"] == str(tinker_home) and started[0]["PYTHONUNBUFFERED"] == "1"
+
+
+def test_a_started_tinker_only_has_the_runner_job_it_is_given(tinker_home, monkeypatch):
+    monkeypatch.setenv(RUNNER_JOB_ENV, "7")
+    assert RUNNER_JOB_ENV not in tinker_environment()
+    assert tinker_environment(**{RUNNER_JOB_ENV: "3"})[RUNNER_JOB_ENV] == "3"

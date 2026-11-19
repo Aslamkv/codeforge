@@ -257,7 +257,8 @@ def tinker_command():
 
 
 def tinker_environment(**extra):
-    return dict(os.environ, **{HOME_ENV: str(Home.root)}, **extra)
+    inherited = {name: value for name, value in os.environ.items() if name != RUNNER_JOB_ENV}
+    return dict(inherited, **{HOME_ENV: str(Home.root)}, **extra)
 
 
 def tinker_process(arguments, folder=None, output=None, **env):

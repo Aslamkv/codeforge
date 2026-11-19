@@ -545,6 +545,7 @@ def answered_in_words(batch):
         if "message" in episode
         and "reply" in episode
         and "commands" not in episode
+        and "routed" not in episode
         and episode.get("status") != "remembered"
     ]
 

@@ -385,6 +385,18 @@ class Home:
         return folder / (re.sub(r"[^\w.-]+", "-", Path(name).name).strip("-.") or "book")
 
     @classmethod
+    def run_folder(cls, number):
+        folder = cls.root / "instruction" / str(number)
+        folder.mkdir(parents=True, exist_ok=True)
+        run = 1
+        while True:
+            try:
+                (made := folder / str(run)).mkdir()
+                return made
+            except FileExistsError:
+                run += 1
+
+    @classmethod
     def skill_folder(cls, name):
         folder = cls.root / "skills"
         folder.mkdir(parents=True, exist_ok=True)
@@ -492,8 +504,8 @@ class Home:
             cls.store().delete(collection)
 
     @classmethod
-    def keep_awake(cls):
-        command = cls.stay_awake_command(str(os.getpid()))
+    def keep_awake(cls, pid=None):
+        command = cls.stay_awake_command(str(pid or os.getpid()))
         if not command:
             return
         try:
@@ -636,7 +648,8 @@ class Numbered:
     @staticmethod
     def page(entries, number):
         pages = max(1, -(-len(entries) // PER_PAGE))
-        return Paged(entries[(number - 1) * PER_PAGE : number * PER_PAGE], pages)
+        shown = min(number, pages)
+        return Paged(entries[(shown - 1) * PER_PAGE : shown * PER_PAGE], pages)
 
 
 class NotAPytestClass:

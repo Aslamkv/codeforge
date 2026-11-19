@@ -133,9 +133,9 @@ COMMANDS = [
         "confirm",
         "Build",
         "confirm [@PROJECT]",
-        "say yes to what waits: a plan, or in a chat a deletion or offer",
-        "Say yes to what waits for confirmation: build the plan that waits (as resume); in a chat, also carry out "
-        "a deletion or an offer that waits.",
+        "say yes to what waits: a plan, an instruction's line, or in a chat a deletion or offer",
+        "Say yes to what waits for confirmation: build the plan that waits (as resume), or start an instruction's "
+        "command line that waits; in a chat, also carry out a deletion or an offer that waits.",
         kind="job",
         chat=True,
         words=True,
@@ -405,12 +405,38 @@ COMMANDS = [
         "stop [#JOB]",
         "stop a job (it is saved): the one that runs, or #N",
         "Stop a job as Ctrl-C does: what it did is kept, and resume #N goes on from there. Without a number, the "
-        "job that runs, whatever it is. A queued job that is stopped leaves the queue and never goes on by itself.",
+        "job that runs, whatever it is. A queued job that is stopped leaves the queue and never goes on by itself. "
+        "Inside an instruction, stop alone stops its last run.",
         kind="own",
         chat=True,
         words=True,
         arguments=[Argument("words", "*", "[#JOB]", "the job, as jobs numbers it")],
         example="stop #3",
+    ),
+    Command(
+        "pause",
+        "Jobs",
+        "pause",
+        "pause the last run of the instruction you are inside",
+        "Inside an instruction, pause holds its last run where it is; resume goes on with it. Outside one, it says "
+        "it works inside one.",
+        kind="own",
+        chat=True,
+        words=True,
+        cli=False,
+    ),
+    Command(
+        "undo",
+        "Jobs",
+        "undo",
+        "undo the last run not undone yet of the instruction you are inside",
+        "Inside an instruction, undo stops its last run not undone yet if it is live, previews the backups it puts "
+        "back and its undo line, and waits for confirm. Each undo goes one run further back. Outside one, it says "
+        "it works inside one.",
+        kind="own",
+        chat=True,
+        words=True,
+        cli=False,
     ),
     Command(
         "queue",
@@ -433,7 +459,8 @@ COMMANDS = [
         "Go on with a stopped job where it stopped (#N; without one, the job stopped last): what it asked the "
         "model and the web before is answered from its journal, not asked again. resume @PROJECT continues a "
         "project's run (@ID or @folder, from anywhere; with no job stopped, this folder's); a plan that waits for "
-        "confirmation is confirmed: building starts.",
+        "confirmation is confirmed: building starts. Inside an instruction, resume alone goes on with its last run "
+        "(one that has ended is offered again, to /confirm).",
         kind="job",
         chat=True,
         words=True,
@@ -686,14 +713,25 @@ COMMANDS = [
         example="chat hello",
     ),
     Command(
-        "command",
+        "instruct",
         "Talk",
-        "command WHAT",
-        "the command line that does it, run once you confirm",
+        "instruct WHAT",
+        "do something on this computer with shell commands, each run once you confirm",
         kind="pauses",
         chat=True,
         words=True,
-        example="command show the free disk space",
+        cli=False,
+        example="instruct list the biggest files here",
+    ),
+    Command(
+        "instructions",
+        "Talk",
+        "instructions [PAGE] | #N",
+        "the instructions with their last run's state, or #N to go inside one",
+        kind="glance",
+        chat=True,
+        words=True,
+        cli=False,
     ),
     Command(
         "run",

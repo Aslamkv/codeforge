@@ -34,6 +34,20 @@ def test_reply_drops_thinking_and_whitespace():
         pytest.param('{"k": "[]}"}', {"k": "[]}"}, id="closers and quote inside a string"),
         pytest.param('{"a": [1, 2]', {"a": [1, 2]}, id="object never closed"),
         pytest.param(
+            '{"line": "cd /tmp/b && (find . -name "*.log" -delete)", "does": "x", "touches": [], '
+            '"undo": "can\'t be undone"}',
+            {
+                "line": 'cd /tmp/b && (find . -name "*.log" -delete)',
+                "does": "x",
+                "touches": [],
+                "undo": "can't be undone",
+            },
+            id="unescaped quotes inside a string value",
+        ),
+        pytest.param(
+            '{"a": ["say "hi" ", "b"]}', {"a": ['say "hi" ', "b"]}, id="inner quotes in a list item"
+        ),
+        pytest.param(
             '{"confirm":["t4"],"question":"q","suggestions":["x","y"]',
             {"confirm": ["t4"], "question": "q", "suggestions": ["x", "y"]},
             id="reply ends before its last closer",
@@ -46,6 +60,16 @@ def test_reply_drops_thinking_and_whitespace():
         ),
         pytest.param('{"a": 1} or else {"b": 2}', {"a": 1}, id="first whole object wins"),
         pytest.param('Here {"a": 1} {broken', {"a": 1}, id="unclosed brace after the object"),
+        pytest.param(
+            r'{"line": "find . -name x -exec mv {} notes/ \;", "does": "x", "touches": [], "undo": "y"}',
+            {"line": r"find . -name x -exec mv {} notes/ \;", "does": "x", "touches": [], "undo": "y"},
+            id="bare backslash escape in a string",
+        ),
+        pytest.param(
+            r'{"line": "grep \"a\" . -exec rm {} \;", "undo": "y"}',
+            {"line": r'grep "a" . -exec rm {} \;', "undo": "y"},
+            id="bare backslash beside a valid escape",
+        ),
     ],
 )
 def test_json_in_prose_mends_the_usual_slips(text, expected):
@@ -319,9 +343,26 @@ def test_the_templates_format():
     assert "/clear chat" in fill and "Running: calc" in fill
     tell = Prompts.COMMAND_TELL_SYSTEM.format(style=Prompts.TERMINAL_STYLE)
     assert Prompts.TERMINAL_STYLE in tell
-    assert '{"command": ' in Prompts.COMMAND_SYSTEM.format(system="Darwin", shell="zsh", folder="/tmp")
+    command = Prompts.COMMAND_SYSTEM.format(system="Darwin", shell="zsh", folder="/tmp")
+    assert all(f'"{key}": ' in command for key in ("line", "does", "touches", "undo"))
     systems = [value for key, value in vars(Prompts).items() if key.endswith("_SYSTEM")]
     assert len(systems) >= 25 and all(isinstance(system, str) and system.strip() for system in systems)
+
+
+@pytest.mark.spec("INS-9")
+def test_the_command_prompt_keeps_a_recalled_line_and_the_systems_own_flags():
+    command = Prompts.COMMAND_SYSTEM.format(system=Prompts.MACOS, shell="zsh", folder="/tmp")
+    assert "this system's own tools" in command and "--block-size" in Prompts.MACOS
+    assert "under What you remember" in Prompts.COMMAND_RECALLED
+    assert "changing only its paths" in Prompts.COMMAND_RECALLED
+
+
+@pytest.mark.spec("INS-2")
+def test_the_command_prompt_answers_a_stated_problem_with_a_looking_line():
+    command = Prompts.COMMAND_SYSTEM.format(system=Prompts.MACOS, shell="zsh", folder="/tmp")
+    assert '"line": ""' not in command
+    assert "only lists or measures what it names" in command
+    assert "never one that changes or deletes" in command
 
 
 @pytest.mark.spec("CNV-18")
@@ -336,17 +377,76 @@ def test_the_phone_style_is_brief_and_the_terminal_style_is_not_a_phone():
 def test_the_route_prompt_asks_for_only_the_command_names_or_none():
     route = Prompts.CHAT_ROUTE_SYSTEM.format(index="/clear — wipe the chat")
     assert "only the command names, one per line" in route and "`none`" in route
-    assert "how to do something" not in route
     assert "how to use one of Tinker's commands is `/help`" in route
-    assert "how to do anything else is `none`" in route
+    assert "how to do anything else is `none`" not in route
     assert "(`/help` for `how do I learn a skill?`)" in route
     assert route.index("how to use one of Tinker's commands") < route.index("only the command names")
+
+
+@pytest.mark.spec("CNV-18")
+def test_the_route_prompt_sends_doing_and_how_to_on_this_computer_to_instruct():
+    route = Prompts.CHAT_ROUTE_SYSTEM.format(index="/instruct — do it")
+    assert (
+        "Asked to do something on this computer that no command does, or how to do it there (look at, "
+        "list, measure, change or run something in its files, folders or terminal), is `/instruct`" in route
+    )
+    assert "a question about what is on this computer is `/instruct`" in route
+    assert route.index("`/instruct`") < route.index("only the command names")
+
+
+@pytest.mark.spec("CNV-18")
+def test_the_route_prompt_never_asks_and_sends_unsure_to_instruct():
+    route = Prompts.CHAT_ROUTE_SYSTEM.format(index="/instruct — do it")
+    assert "`ask`" not in route
+    assert "(`/instruct` for `my downloads folder is a mess`)" in route
+    assert "a message unsure between running something and answering" in route
+
+
+@pytest.mark.spec("CNV-18")
+def test_the_route_prompt_keeps_none_for_words_alone():
+    route = Prompts.CHAT_ROUTE_SYSTEM.format(index="/instruct — do it")
+    assert "`none` is only for wanting words alone, such as knowledge " in route
+    assert "or how to do something away from this computer" in route
+    assert "(`none` for `how do I fold a fitted sheet?`)" in route
+    assert "or `none` when no command does it" not in route
+
+
+@pytest.mark.spec("CNV-18")
+def test_the_route_prompt_sends_a_knowledge_question_to_none_never_knowledge():
+    route = Prompts.CHAT_ROUTE_SYSTEM.format(index="/knowledge — browse what Tinker learned")
+    assert (
+        "(`none` for `what is a black hole?`, never `/knowledge`, which browses what Tinker learned)" in route
+    )
+
+
+@pytest.mark.spec("CNV-18")
+def test_the_route_prompt_puts_the_rules_before_the_command_index():
+    route = Prompts.CHAT_ROUTE_SYSTEM.format(index="/clear — wipe the chat")
+    assert route.startswith("You pick which of Tinker's commands do what the person asks. ")
+    assert route.endswith("\nThe commands, each with what it is for:\n/clear — wipe the chat")
+    assert route.index("only the command names") < route.index("/clear — wipe the chat")
 
 
 @pytest.mark.spec("CNV-18", "RVW-3")
 def test_the_answer_prompt_holds_no_commands():
     chat = Prompts.CHAT_SYSTEM.format(style=Prompts.PHONE_STYLE, state="")
-    assert "{index}" not in Prompts.CHAT_SYSTEM and "command names" not in chat and "/" not in chat
+    assert "{index}" not in Prompts.CHAT_SYSTEM and "command names" not in chat
+    assert "/" not in chat.replace("`/instruct`", "")
+
+
+@pytest.mark.spec("CNV-18")
+def test_the_answer_prompt_only_talks_and_points_actions_to_instruct():
+    chat = Prompts.CHAT_SYSTEM.format(style=Prompts.PHONE_STYLE, state="")
+    assert "nothing runs, so never say you did, ran, checked, changed or deleted anything" in chat
+    assert "send it as `/instruct` followed by what to do" in chat
+    assert "never give shell commands to run" in chat
+
+
+@pytest.mark.spec("CNV-18")
+def test_the_answer_prompts_instruct_pointer_is_its_last_rule():
+    chat = Prompts.CHAT_SYSTEM.format(style=Prompts.PHONE_STYLE, state="")
+    assert chat.endswith("followed by what to do.")
+    assert chat.index(Prompts.PHONE_STYLE) < chat.index("nothing runs")
 
 
 @pytest.mark.spec("CNV-18", "SYS-1")

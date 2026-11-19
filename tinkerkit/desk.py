@@ -32,8 +32,9 @@ from .chat.reports import (
     until_ended,
 )
 from .chat.shell import (
+    CANT_BE_UNDONE,
     CHAT_COMMAND_OUTPUT_SHOWN_CHARS,
-    COMMAND_NAMING_MAX_TOKENS,
+    Checked,
     Question,
     Shell,
     first_words,
@@ -75,7 +76,8 @@ from .jobs import (
 from .memory.memories import Memories, Scratchpad
 from .skills import Skills
 lazy from .chat.ledger import DONE_NOTE_KEPT_SECONDS, Ledger
-lazy from .messages import next_page_line, next_page_words, say
+lazy from .instructions import Instructions, Run
+lazy from .messages import human_duration, next_page_line, next_page_words, say
 lazy from .messages import styled as styled_choice
 lazy from .model.models import Cut, Models, Ollama, OllamaError, system_turn
 lazy from .prompts import Part, Prompts
@@ -123,19 +125,23 @@ COMMANDS_ASKING_FOR_WORDS = tuple(
     if command.chat
     and command.name != "clear"
     and any(argument.nargs in ("+", None) for argument in command.arguments)
-) + ("command",)
+) + ("instruct",)
 CHAT_APP_START = "/start"
 CHAT_FRESH = "/fresh"
+CHAT_CONFIRM = "/confirm"
 CHAT_LEAVE = "/leave"
 CHAT_SKIP = "/skip"
+RUN_BUTTON = "✅ Run"
 NEXT_PAGE_BUTTON = "Next page ›"
 FRESH_ANSWER_BUTTON = "🔄 Fresh answer"
 LEAVE_READING_BUTTON = "📕 Leave #{number}"
 LEAVE_JOB_BUTTON = "⚙️ Leave #{number}"
+LEAVE_INSTRUCTION_BUTTON = "🚪 Leave #{number}"
 SKIP_QUESTION_BUTTON = "⏭ Skip"
 LEAVE_INTERVIEW_BUTTON = "🚪 Leave"
 INTERVIEW_ENTERED = "💬 **Interview**: answer, /skip · /leave leaves it"
 INTERVIEW_LEFT = "💬 **Left the interview**"
+STILL_THINKING = "💭 Still thinking, one moment."
 NO_QUESTION_YET = "❓ **No question yet** to ask again."
 START_WELCOME = """👋 **Hi, I'm Tinker!**
 I build small programs for you, on this computer, with an AI model that runs right here.
@@ -155,7 +161,7 @@ I build small programs for you, on this computer, with an AI model that runs rig
 💬 **Ask me anything**
 - Just write to me: what is not a command is a normal chat
 - `/research the newest Python release`: I study it on the web, thoroughly, and keep what I find (it takes a while)
-- `/command how full is my disk`: I find the command line, and run it once you `/confirm`
+- `/instruct how full is my disk`: I find the command lines, and run each once you `/confirm`
 - `/learn rust`: I study it, and use it in my builds
 
 ⏳ **While I work**
@@ -184,6 +190,8 @@ class NoShelf:
 
 
 ALL_FOR_NOW = "That's all I had on my mind for now."
+PAUSE_OUTSIDE = "🛠 `/pause` works inside an instruction (`/instructions #N` enters one)"
+UNDO_OUTSIDE = "🛠 `/undo` works inside an instruction (`/instructions #N` enters one)"
 
 
 class Turn(NamedTuple):
@@ -238,20 +246,29 @@ class InsideReading(NamedTuple):
     def takes(self, text):
         return not text.startswith("/")
 
+    def cancels_quietly(self, text):
+        return False
+
+    def run_control(self, desk, channel, chat, command):
+        return None
+
+    def undo(self, desk, channel, chat):
+        return None
+
 
 class InsideInterview(NamedTuple):
     interview: object
 
     def answer(self, desk, channel, message):
+        if desk.turn_busy(message.chat):
+            channel.send(message.chat, STILL_THINKING)
+            return
+        desk.take_turn(channel, message.chat, self, lambda: self.next_turn(message), str)
+
+    def next_turn(self, message):
         if message.text.split() == [CHAT_SKIP]:
-            turn = self.interview.skipped(message.chat)
-        else:
-            turn = self.interview.answered(message.chat, message.text)
-        if turn.over:
-            channel.send(message.chat, turn.text)
-            desk.leave_mode(channel, message.chat)
-        else:
-            self.offer(desk, channel, message.chat, channel.send(message.chat, turn.text))
+            return self.interview.skipped(message.chat)
+        return self.interview.answered(message.chat, message.text)
 
     def offer(self, desk, channel, chat, shown):
         channel.offer_answers(chat, shown)
@@ -274,6 +291,15 @@ class InsideInterview(NamedTuple):
     def takes(self, text):
         return text.split() == [CHAT_SKIP] or not text.startswith("/")
 
+    def cancels_quietly(self, text):
+        return False
+
+    def run_control(self, desk, channel, chat, command):
+        return None
+
+    def undo(self, desk, channel, chat):
+        return None
+
 
 class InsideJob(NamedTuple):
     number: int
@@ -282,6 +308,12 @@ class InsideJob(NamedTuple):
     def offer(self, desk, channel, chat, shown):
         JobFollower(desk, channel, chat, self, shown).start()
         self.offer_leave(channel, chat, shown)
+
+    def run_control(self, desk, channel, chat, command):
+        return None
+
+    def undo(self, desk, channel, chat):
+        return None
 
     def offer_leave(self, channel, chat, shown):
         channel.offer_leave(chat, shown, LEAVE_JOB_BUTTON.format(number=self.number))
@@ -325,6 +357,197 @@ class InsideJob(NamedTuple):
 
     def takes(self, text):
         return False
+
+    def cancels_quietly(self, text):
+        return False
+
+
+class InstructionShell(Shell):
+    def __init__(self, talk, questions, number):
+        super().__init__(talk, Path(Instructions.working_folder(number)).expanduser(), questions)
+        self.number = number
+
+    def wait_for_confirm(self, channel, chat, proposed):
+        self.note_proposal(proposed)
+        super().wait_for_confirm(channel, chat, proposed)
+
+    def start_at_once(self, channel, chat, proposed):
+        self.note_proposal(proposed)
+        super().start_at_once(channel, chat, proposed)
+
+    def note_proposal(self, proposed):
+        Instructions.said(self.number, "proposal", proposed["line"])
+
+    def offer_run(self, channel, chat, ids):
+        if ids:
+            channel.offer_run(chat, ids[-1], LEAVE_INSTRUCTION_BUTTON.format(number=self.number))
+
+    def run(self, channel, chat, proposed):
+        line = proposed["line"]
+        try:
+            run_folder = Run.start(self.number, line, str(self.folder), proposed["touches"])
+        except OSError as error:
+            channel.show(
+                chat,
+                proposed["shown"],
+                md(t"❌ **Could not start** {line:code}: {error.strerror}"),
+                done=True,
+            )
+            return
+        Instructions.ran(self.number, run_folder, chat, proposed)
+        channel.show(chat, proposed["shown"], f"▶️ **Running** `{line}` …", done=True)
+
+
+class RoutedInstructionShell(InstructionShell):
+    def __init__(self, talk, questions, number, unrouted):
+        super().__init__(talk, questions, number)
+        self.unrouted = unrouted
+
+    def drop(self, channel, chat, proposed):
+        super().drop(channel, chat, proposed)
+        self.unrouted()
+
+
+class UndoShell(InstructionShell):
+    def note_proposal(self, proposed):
+        if proposed["line"]:
+            super().note_proposal(proposed)
+
+    def run(self, channel, chat, proposed):
+        Run.restore(proposed["run_folder"])
+        Instructions.undone(self.number, proposed["run_folder"])
+        if proposed["line"]:
+            return super().run(channel, chat, proposed)
+        channel.show(chat, proposed["shown"], md(t"↩️ **Undone** {proposed['undoes']:code}"), done=True)
+
+    def drop(self, channel, chat, proposed):
+        channel.show(chat, proposed["shown"], md(t"🚫 _Not undone:_ {proposed['undoes']:code}"), done=True)
+
+    @staticmethod
+    def preview(proposed, overwritten):
+        def shown(path):
+            mark = " (overwritten: changed since the run)" if path in overwritten else ""
+            return md(t"{path:code}") + mark
+
+        restores = ", ".join(shown(path) for path in proposed["restores"]) or "nothing"
+        then = md(t"\n**Then runs:** {proposed['line']:code}") if proposed["line"] else ""
+        return md(
+            t"↩️ **Undo** {proposed['undoes']:code}?\n**Puts back:** {restores:md}{then:md}\n"
+            t"👉 `/confirm` to undo it · anything else cancels it"
+        )
+
+
+class InsideInstruction(NamedTuple):
+    number: int
+    title: str
+
+    def answer(self, desk, channel, message):
+        Instructions.said(self.number, "amend", message.text)
+        self.propose(desk, channel, message)
+
+    def propose(self, desk, channel, message):
+        self.propose_in(InstructionShell(desk.talk, desk.questions, self.number), desk, channel, message)
+
+    def propose_in(self, shell, desk, channel, message):
+        thread = Instructions.get(self.number)["thread"]
+        shell.name(channel, message, desk.running_now, thread)
+
+    def offer(self, desk, channel, chat, shown):
+        pass
+
+    def entered_line(self, chat):
+        return md(t"🛠 **Inside #{self.number} {self.title}** · `/leave` leaves it")
+
+    def left_line(self):
+        return md(t"🛠 **Left #{self.number} {self.title}**")
+
+    def env(self):
+        return {}
+
+    def gone(self, shelf):
+        return Instructions.get(self.number) is None
+
+    def prompt(self):
+        return f"🛠 #{self.number} {self.title} › "
+
+    def takes(self, text):
+        return not text.startswith("/")
+
+    def cancels_quietly(self, text):
+        return self.takes(text)
+
+    def run_control(self, desk, channel, chat, command):
+        runs = Instructions.get(self.number)["runs"]
+        if not runs:
+            return md(t"🤷 **No run to {command}** in #{self.number}")
+        controls = {"stop": self.stop_run, "pause": self.pause_run, "resume": self.resume_run}
+        return controls[command](desk, channel, chat, runs[-1])
+
+    def stop_run(self, desk, channel, chat, run):
+        if not Run.stop(run["folder"]):
+            return self.ended_line(run)
+        return md(t"⏹ **Stopping** {run['line']:code}")
+
+    def pause_run(self, desk, channel, chat, run):
+        if not Run.pause(run["folder"]):
+            return self.ended_line(run)
+        return md(t"⏸ **Paused** {run['line']:code} · `/resume` goes on")
+
+    def resume_run(self, desk, channel, chat, run):
+        if Run.go_on(run["folder"]):
+            return md(t"▶️ **Going on** {run['line']:code}")
+        shell = InstructionShell(desk.talk, desk.questions, self.number)
+        proposed = {
+            "line": run["line"],
+            "asked": run.get("asked", ""),
+            "shown": None,
+            "does": run.get("does", ""),
+            "touches": run.get("touches", []),
+            "undo": run.get("undo") or "",
+        }
+        return Checked.of(run["line"], shell.folder).offer(shell, channel, chat, proposed)
+
+    def undo(self, desk, channel, chat):
+        run = self.run_to_undo()
+        if run is None:
+            return md(t"🤷 **Nothing to undo** in #{self.number}")
+        if self.irreversible(run):
+            Instructions.undone(self.number, run["folder"])
+            return md(t"⚠️ {run['line']:code} can't be undone")
+        proposed = {
+            "line": self.undo_line(run),
+            "undoes": run["line"],
+            "run_folder": run["folder"],
+            "restores": list(Run.backups(run["folder"]).restores),
+            "asked": run.get("asked", ""),
+            "shown": None,
+            "does": "",
+            "touches": (),
+            "undo": CANT_BE_UNDONE,
+        }
+        UndoShell(desk.talk, desk.questions, self.number).wait_for_confirm(channel, chat, proposed)
+        return UndoShell.preview(proposed, Run.overwritten(run["folder"]))
+
+    def run_to_undo(self):
+        while (run := Instructions.to_undo(self.number)) is not None:
+            if Run.ended(run["folder"]) is None:
+                Run.stop(run["folder"])
+            if self.irreversible(run) or self.undo_line(run) or Run.backups(run["folder"]).restores:
+                return run
+            Instructions.undone(self.number, run["folder"])
+        return None
+
+    @staticmethod
+    def irreversible(run):
+        return Run.backups(run["folder"]).irreversible or run.get("irreversible")
+
+    @staticmethod
+    def undo_line(run):
+        return "" if run.get("undo") == CANT_BE_UNDONE else run.get("undo") or ""
+
+    @staticmethod
+    def ended_line(run):
+        return md(t"🤷 {run['line']:code} has ended")
 
 
 class JobFollower:
@@ -397,23 +620,9 @@ def one_shot(command, text):
         return f"tinker {command} needs words after it, e.g. tinker {command} {'hello' if command == 'chat' else '...'}"
     if command == "chat":
         console.show(chat, None, talk.reply(console, message), done=True)
-    elif command == "run":
+    else:
         Desk([console], Path.cwd()).run_app(console, chat, [text])
-    else:
-        command_once(console, talk, message)
     return None
-
-
-def command_once(console, talk, message):
-    chat, shell = ConsoleChannel.CHAT, Shell(talk, Path.cwd(), Questions())
-    console.show(chat, None, shell.propose(console, message, "", COMMAND_NAMING_MAX_TOKENS), done=True)
-    proposed = shell.take(console, chat)
-    if not proposed:
-        return
-    if say.agreed("Run it?"):
-        shell.run(console, chat, proposed)
-    else:
-        console.show(chat, None, f"🚫 _Not run:_ `{proposed['line']}`", done=True)
 
 
 @dataclass
@@ -506,12 +715,11 @@ class Desk:
 
     def __init__(self, channels, root, shelf=None, interview=None, interviewing=False):
         self.channels, self.root = channels, Path(root).resolve()
-        self.shelf, self.inside = shelf or NoShelf(), {}
+        self.shelf, self.inside, self.turning = shelf or NoShelf(), {}, {}
         self.interview, self.interviewing = interview or NoInterview(), interviewing
         self.last_task = self.reporter = self.task = None
         self.lock, self.talk = threading.Lock(), Talk(commands_brief(), pausing_jobs=answering)
         self.questions = Questions()
-        self.shell = Shell(self.talk, self.root, self.questions)
         self.waiting_plan = NoWaitingPlan()
         self.messages_by_run = {}
         self.seconds_by_run = {}
@@ -531,6 +739,7 @@ class Desk:
         self.hosting = Runner.host()
         self.open_banner()
         self.talk.warm()
+        Memories(Retriever(Embeddings.configured())).add_starter_tools()
         self.say_status(anew=True)
         if self.interviewing:
             self.open_interview()
@@ -637,6 +846,40 @@ class Desk:
                             channel.show(chat, None, text, done=True)
         for console in self.consoles:
             console.show(ConsoleChannel.CHAT, None, text, done=True)
+
+    def say_run_endings(self):
+        for number, run in Instructions.unposted_runs():
+            end = Run.ended(run["folder"])
+            if end is None:
+                continue
+            self.say_in_chat(run["chat"], self.run_ending(run["line"], end))
+            Instructions.said(number, "output", end.output)
+            episode = Shell.kept(run["chat"], run, end.code, end.output)
+            if end.code == 0 and "undoes" not in run and not run.get("at_once"):
+                keep_memory("tool", run["corrected"] or run["asked"], run["line"], [episode["id"]])
+            Instructions.posted(number, run["folder"])
+
+    @staticmethod
+    def run_ending(line, end):
+        head = Desk.run_ending_head(line, end)
+        if end.needs_terminal:
+            return f"{head}\nRuns have no terminal, so this line can't run here."
+        return f"{head}\n{Shell.folded(end.output)}"
+
+    @staticmethod
+    def run_ending_head(line, end):
+        if end.code == "stopped":
+            return md(t"⏹ {line:code} · _stopped_")
+        return md(t"{'✅' if end.code == 0 else '❌'} {line:code} · _exit {end.code}_")
+
+    def say_in_chat(self, chat, text):
+        for channel in self.channels:
+            if channel in self.consoles:
+                if chat == ConsoleChannel.CHAT:
+                    channel.show(chat, None, text, done=True)
+            elif chat in channel.allowed:
+                with self.post_lock:
+                    channel.show(chat, None, text, done=True)
 
     def renew_banner_when_changed(self):
         if self.banner_lines() != self.shown_banner:
@@ -766,11 +1009,13 @@ class Desk:
 
     def keep_up(self):
         self.adopt_exercise()
+        self.say_run_endings()
         looked = collected = 0.0
         while not self.a_channel_closed():
             time.sleep(ENDED_LOOK_SECONDS)
             self.say_state_changes()
             self.say_idle_endings()
+            self.say_run_endings()
             if time.monotonic() - collected >= EXPIRED_MESSAGES_SWEEP_SECONDS:
                 collected = time.monotonic()
                 for channel in self.channels:
@@ -820,7 +1065,8 @@ class Desk:
 
     def handled(self, channel, message, asked):
         said = self.as_said(channel, self.with_words_wanted(channel, message))
-        self.cancel_unless_confirmed(channel, said)
+        if self.cancel_left_mode(channel, said):
+            return
         if message.text.split()[:1] == [CHAT_APP_START]:
             channel.send(message.chat, welcome())
             return
@@ -857,8 +1103,11 @@ class Desk:
                 message,
                 self.running_now,
                 ChatState(self),
-                on_command=lambda line: self.replied(channel, message, line),
+                on_command=self.unless_mode_changed(channel, message),
             )
+            return
+        if command == "instruct" and asked is not None:
+            self.instruct_routed(channel, message)
             return
         mode_before = self.inside.get(message.chat)
         reply = self.answer(message, channel)
@@ -881,7 +1130,7 @@ class Desk:
 
     def left(self, channel, chat):
         if chat not in self.inside:
-            return "📕 **Not inside a reading, the interview or a job**"
+            return "📕 **Not inside a reading, the interview, a job or an instruction**"
         return self.leave_mode(channel, chat).left_line()
 
     def left_if_gone(self, channel, chat):
@@ -895,11 +1144,14 @@ class Desk:
         return mode
 
     def answered_inside(self, channel, message):
-        self.left_if_gone(channel, message.chat)
-        if message.chat not in self.inside or not self.inside[message.chat].takes(message.text):
+        if not self.taken_inside(channel, message):
             return False
         self.inside[message.chat].answer(self, channel, message)
         return True
+
+    def taken_inside(self, channel, message):
+        self.left_if_gone(channel, message.chat)
+        return message.chat in self.inside and self.inside[message.chat].takes(message.text)
 
     def fresh(self, channel, message):
         question = last_asked(message.chat)
@@ -913,8 +1165,17 @@ class Desk:
             self.running_now,
             ChatState(self),
             write=self.talk.asked_reply,
-            on_command=lambda line: self.replied(channel, asked, line),
+            on_command=self.unless_mode_changed(channel, asked),
         )
+
+    def unless_mode_changed(self, channel, message):
+        mode_asked = self.inside.get(message.chat)
+
+        def run(line):
+            if self.inside.get(message.chat) is mode_asked:
+                self.replied(channel, message, line)
+
+        return run
 
     def told(self, channel, message, reply, asked):
         kind = kind_of(command_words(message.text))
@@ -941,7 +1202,7 @@ class Desk:
     def as_said(self, channel, message):
         said = said_command(message.text)
         answers_a_question = said != "/confirm" and self.questions.waiting(channel, message.chat)
-        if not said or answers_a_question:
+        if not said or answers_a_question or self.taken_inside(channel, message):
             return message
         return Message(message.chat, said, message.sender, message.id)
 
@@ -954,20 +1215,24 @@ class Desk:
             return message
         return Message(message.chat, f"/{wanted} {message.text}", message.sender, message.id)
 
-    def asked_with_words(self, channel, message, command):
-        if len(message.text.split()) == 1:
-            channel.send(message.chat, USAGE[command])
-        else:
-            self.shell.name(channel, after_word(message), self.running_now)
-
     def replied(self, channel, message, line):
         self.handle(channel, Message(message.chat, line, message.sender), message.text)
+
+    def cancel_left_mode(self, channel, said):
+        mode_before = self.inside.get(said.chat)
+        self.cancel_unless_confirmed(channel, said)
+        return mode_before is not None and said.chat not in self.inside
 
     def cancel_unless_confirmed(self, channel, said):
         question = self.questions.waiting(channel, said.chat)
         if not question or question.naming or said.text.split() == ["/confirm"]:
             return
-        self.questions.answered(channel, said.chat).cancels()
+        answered = self.questions.answered(channel, said.chat)
+        if not self.cancels_quietly(said):
+            answered.cancels()
+
+    def cancels_quietly(self, said):
+        return said.chat in self.inside and self.inside[said.chat].cancels_quietly(said.text)
 
     def settle(self, channel, message, command):
         confirm = command == "confirm" and len(message.text.split()) == 1
@@ -1043,6 +1308,16 @@ class Desk:
             return ""
         return "\n" + self.listen_on([name])
 
+    def controlled(self, channel, chat, words, on_jobs):
+        if words[1:] or chat not in self.inside:
+            return on_jobs()
+        controlled = self.inside[chat].run_control(self, channel, chat, words[0])
+        return on_jobs() if controlled is None else controlled
+
+    def undo(self, channel, chat):
+        undone = self.inside[chat].undo(self, channel, chat) if chat in self.inside else None
+        return UNDO_OUTSIDE if undone is None else undone
+
     def handlers(self, channel, message, words):
         command = words[0]
         return {
@@ -1050,8 +1325,12 @@ class Desk:
             "confirm": lambda: self.decide([(channel, message.chat)], command, words),
             "amend": lambda: self.decide([(channel, message.chat)], command, words),
             "rename": lambda: self.decide([(channel, message.chat)], command, words),
-            "resume": lambda: self.resume([(channel, message.chat)], words),
-            "stop": lambda: self.stop(words),
+            "resume": lambda: self.controlled(
+                channel, message.chat, words, lambda: self.resume([(channel, message.chat)], words)
+            ),
+            "stop": lambda: self.controlled(channel, message.chat, words, lambda: self.stop(words)),
+            "pause": lambda: self.controlled(channel, message.chat, words, lambda: PAUSE_OUTSIDE),
+            "undo": lambda: self.undo(channel, message.chat),
             "queue": lambda: self.queue(words),
             "research": lambda: self.research([(channel, message.chat)], words),
             "exercise": lambda: self.exercise(channel, message, words),
@@ -1060,7 +1339,6 @@ class Desk:
             "help": lambda: help_text(words[1:2]),
             "history": lambda: history_text(words[1:2]),
             "run": lambda: self.run_app_apart(channel, message),
-            "command": lambda: self.asked_with_words(channel, message, command),
             "clear": lambda: self.clear(channel, message.chat, words),
             "read": lambda: self.read(channel, message.chat, words),
             "knowledge": lambda: self.knowledge(channel, message.chat, words),
@@ -1068,6 +1346,8 @@ class Desk:
             "dream": lambda: self.memory_or_dream(channel, message.chat, words),
             "interact": lambda: self.interviewed(channel, message.chat),
             "jobs": lambda: self.jobs(channel, message.chat, words),
+            "instruct": lambda: self.instruct(channel, message),
+            "instructions": lambda: self.instructions(channel, message.chat, words),
             **{word: lambda: self.ask_to_exit(channel, message.chat, command) for word in EXIT_WORDS},
         }
 
@@ -1097,22 +1377,44 @@ class Desk:
         return self.entered_mode(channel, chat, InsideReading(*reading))
 
     def open_interview(self):
-        console, chat = self.consoles[0], ConsoleChannel.CHAT
-        sent = console.send(chat, self.interviewed(console, chat))
-        self.offer_if_entered(console, chat, sent, None)
+        self.interviewed(self.consoles[0], ConsoleChannel.CHAT)
 
     def interviewed(self, channel, chat):
-        turn = self.interview.turn(chat)
-        if turn.over:
-            return turn.text
         mode = InsideInterview(self.interview)
         self.now_in(channel, chat, mode)
-        return mode.opening(turn.text)
+        self.take_turn(channel, chat, mode, lambda: self.interview.turn(chat), mode.opening)
+
+    def turn_busy(self, chat):
+        return chat in self.turning
+
+    def take_turn(self, channel, chat, mode, work, shown):
+        self.turning[chat] = mode
+        self.apart(lambda: self.turned(channel, chat, mode, work, shown))
+
+    def apart(self, work):
+        threading.Thread(target=work, daemon=True).start()
+
+    def turned(self, channel, chat, mode, work, shown):
+        try:
+            turn = work()
+        except OllamaError as exc:
+            turn = Turn(md(t"⚠️ **The model did not answer:** {first_words(exc)}"), over=True)
+        finally:
+            if self.turning.get(chat) is mode:
+                del self.turning[chat]
+        if self.inside.get(chat) is not mode:
+            return
+        if turn.over:
+            channel.send(chat, turn.text)
+            self.leave_mode(channel, chat)
+        else:
+            mode.offer(self, channel, chat, channel.send(chat, shown(turn.text)))
 
     def jobs(self, channel, chat, words):
         number = job_number(words[1]) if len(words) == 2 else None
         if number is None:
-            return self.by_table(channel, chat, words)
+            listing = self.by_table(channel, chat, words)
+            return listing if deletes(words) or not listing else listing + live_runs_lines()
         job = Jobs.get(number)
         if job is None:
             return md(t"⚙️ **No job #{number}** (`/jobs` lists them)")
@@ -1120,6 +1422,35 @@ class Desk:
         if mode.gone(self.shelf):
             return mode.shown_once()
         return self.entered_mode(channel, chat, mode)
+
+    def instruct(self, channel, message):
+        request = after_word(message)
+        self.entered_instruction(channel, request).propose(self, channel, request)
+
+    def instruct_routed(self, channel, message):
+        request = after_word(message)
+        mode = self.entered_instruction(channel, request)
+
+        def unrouted():
+            channel.send(message.chat, self.left(channel, message.chat))
+
+        shell = RoutedInstructionShell(self.talk, self.questions, mode.number, unrouted)
+        mode.propose_in(shell, self, channel, request)
+
+    def entered_instruction(self, channel, request):
+        entry = Instructions.add(request.text)
+        mode = InsideInstruction(entry["number"], entry["title"])
+        channel.send(request.chat, self.entered_mode(channel, request.chat, mode))
+        return mode
+
+    def instructions(self, channel, chat, words):
+        number = job_number(words[1]) if len(words) == 2 else None
+        if number is None:
+            return instructions_page(int(words[1]) if words[1:2] and words[1].isdigit() else 1)
+        entry = Instructions.get(number)
+        if entry is None:
+            return md(t"🛠 **No instruction #{number}** (`/instructions` lists them)")
+        return self.entered_mode(channel, chat, InsideInstruction(number, entry["title"]))
 
     def entered_mode(self, channel, chat, mode):
         self.now_in(channel, chat, mode)
@@ -1275,7 +1606,10 @@ class Desk:
             return self.ask_folder_name(audience, waiting)
         target = name or waiting.run
         if not target:
-            return "🤷 No plan waits for confirmation: start one with `/task WHAT TO BUILD`"
+            return (
+                "🤷 Nothing waits for confirmation: start a plan with `/task WHAT TO BUILD`, "
+                "or a command line with `/instruct WHAT`"
+            )
         mine = waiting.owns(target)
         folder, title = (waiting.folder, waiting.title) if mine else (self.root, f"@{target}")
         target = waiting.run if mine else target
@@ -1767,8 +2101,8 @@ def answered_episode(message, reply, lines):
     said = reply[0] if reply else ""
     failed = not said or said.startswith("⚠️")
     episode = {"chat": message.chat, "message": message.text, "reply": said}
-    commands = {"commands": lines} if lines else {}
-    return dict(episode, **commands, status=reply_status(said, failed))
+    routed = {"routed": lines} if lines else {}
+    return dict(episode, **routed, status=reply_status(said, failed))
 
 
 def reply_status(said, failed):
@@ -1844,7 +2178,8 @@ def item_phrases(tokens, at):
 
 def unknown_command(text):
     word = text.split()[0].partition("@")[0] if text.startswith("/") else ""
-    return f"❓ No command {word}: /help lists them" if len(word) > 1 else ""
+    is_a_path = "/" in word[1:]
+    return f"❓ No command {word}: /help lists them" if len(word) > 1 and not is_a_path else ""
 
 
 def held_by_another(channel):
@@ -1868,6 +2203,38 @@ def model_asked(pick, rows):
     asked = md(t"🧠 **/{pick}** · choose a model") + (md(t" (in use: {current})") if current else "")
     listed = Markup.fenced("\n".join(Models.label(row) for row in rows))
     return "\n".join([asked, *(md(t"{line}") for line in Models.shown_recipe()), f"```\n{listed}\n```"])
+
+
+def instructions_page(page):
+    entries, pages = Instructions.listed(page)
+    if not entries:
+        return "🛠 **No instructions yet** (`/instruct WHAT` makes one)"
+    lines = [f"#{entry['number']} {entry['title']} {last_run_state(entry)}" for entry in entries]
+    more = [next_page_line(page, pages, f"instructions {page + 1}")] if page < pages else []
+    return "\n".join([md(t"🛠 **Instructions**\n{chr(10).join(lines):block}"), *more])
+
+
+def live_runs_lines():
+    live = Instructions.live()
+    if not live:
+        return ""
+    lines = [f"#{entry['number']} {entry['title']} {live_run_state(entry)}" for entry in live]
+    return "\n" + md(t"🛠 **Live runs**\n{chr(10).join(lines):block}")
+
+
+def live_run_state(entry):
+    run_folder = entry["runs"][-1]["folder"]
+    return f"{last_run_state(entry)} {human_duration(Run.seconds_since_began(run_folder))}"
+
+
+def last_run_state(entry):
+    if not entry["runs"]:
+        return "new"
+    run_folder = entry["runs"][-1]["folder"]
+    end = Run.ended(run_folder)
+    if end is None:
+        return "paused" if Run.is_paused(run_folder) else "running"
+    return end.code if end.code in ("unknown", "stopped") else f"exit {end.code}"
 
 
 def after_word(message):
@@ -1936,7 +2303,16 @@ class Talk:
         self.commands, self.turn = commands, threading.Lock()
         self.pausing_jobs = pausing_jobs
 
-    def answer(self, channel, message, now, state=NO_CHAT_STATE, write=None, on_shown=None, on_command=None):
+    def answer(
+        self,
+        channel,
+        message,
+        now,
+        state=NO_CHAT_STATE,
+        write=None,
+        on_shown=None,
+        on_command=None,
+    ):
         threading.Thread(
             target=self.answering,
             args=(channel, message, now, state, write or self.reply, on_shown, on_command),
@@ -1999,6 +2375,9 @@ class Talk:
         return remembered or self.asked_reply(channel, message, state, tokens)
 
     def asked_reply(self, channel, message, state=NO_CHAT_STATE, tokens=CHAT_MAX_REPLY_TOKENS):
+        return self.modeled_reply(channel, message, state, tokens, self.routed_reply)
+
+    def modeled_reply(self, channel, message, state, tokens, replying):
         if not Models.quick():
             return (
                 "⚠️ **No model is in use yet**, so I cannot chat: `tinker model NAME` picks "
@@ -2011,28 +2390,34 @@ class Talk:
         )
         asked = [{"role": "user", "content": message.text}]
         try:
-            text = self.routed(channel, message.chat, asked, thread)
-            names = named_commands(text)
-            if not names:
-                text = self.answered(channel, message, asked, memories, state, thread, tokens)
-            elif any(takes_words(name) for name in names):
-                filled = self.filled(channel, message, asked, names, state, thread, tokens)
-                text = routed_lines(filled, names) or slashed_lines(text)
-            else:
-                text = "\n".join(f"/{name}" for name in names)
+            text = replying(channel, message, asked, memories, state, thread, tokens)
         except OllamaError as exc:
             return md(t"⚠️ **The model did not answer:** {first_words(exc)}")
         return text or "_(no answer)_"
 
-    def routed(self, channel, chat, asked, thread):
-        system = Prompts.CHAT_ROUTE_SYSTEM.format(index=chat_index()) + thread
-        return self.ask(channel, chat, [system_turn(system)] + asked, CHAT_ROUTE_TOKENS, "off", 0) or ""
+    def routed_reply(self, channel, message, asked, memories, state, thread, tokens):
+        text = self.routed(channel, message, asked)
+        names = named_commands(text)
+        if not names:
+            return self.answered(channel, message, asked, memories, state, thread, tokens)
+        if "instruct" in names:
+            return instruct_line(message)
+        if any(takes_words(name) for name in names):
+            filled = self.filled(channel, message, asked, names, state, thread, tokens)
+            return routed_lines(filled, names) or slashed_lines(text)
+        return "\n".join(f"/{name}" for name in names)
 
-    def answered(self, channel, message, asked, memories, state, thread, tokens):
+    def routed(self, channel, message, asked):
+        system = Prompts.CHAT_ROUTE_SYSTEM.format(index=chat_index())
+        return (
+            self.ask(channel, message.chat, [system_turn(system)] + asked, CHAT_ROUTE_TOKENS, "off", 0) or ""
+        )
+
+    def answered(self, channel, message, asked, memories, state, thread, tokens, prompt=Prompts.CHAT_SYSTEM):
         recalled = unanswered(memories, message.text, memories.recall(message.text))
         level = reviewed_level(message.text, thread)
         system = (
-            Prompts.CHAT_SYSTEM.format(style=channel.STYLE, state=state_part(state.everyday()))
+            prompt.format(style=channel.STYLE, state=state_part(state.everyday()))
             + traits_part(message.text)
             + remembered_part(recalled)
             + thread
@@ -2143,6 +2528,7 @@ def history_text(words=()):
         return history_thing(word)
     page = int(word) if word.isdigit() and int(word) > 0 else 1
     things, pages = Ledger.page(page)
+    page = min(page, pages)
     if not things:
         return "📜 **History:** nothing shown in the chats yet"
     lines = [f"📜 **History** · page {page} of {pages}"]
@@ -2225,9 +2611,11 @@ def slashed_lines(reply):
 
 def is_routed(line, names):
     bare = bare_line(line)
-    if not (bare.startswith("/") and command_of(bare)):
-        return True
-    return line_name(bare.removeprefix("/")) in names
+    return bare.startswith("/") and bool(command_of(bare)) and line_name(bare.removeprefix("/")) in names
+
+
+def instruct_line(message):
+    return f"/instruct {message.text}"
 
 
 def bare_line(line):
@@ -2270,6 +2658,10 @@ def question_of(item):
 
 class Remembered(str):
     pass
+
+
+def keep_memory(kind, gist, text, sources):
+    Memories(Retriever(Embeddings.configured())).add(kind, gist=gist, text=text, sources=sources)
 
 
 def remembered_answer(request):

@@ -26,6 +26,15 @@ from ..text import similarity, words
 EPISODE_BOOKKEEPING = frozenset({"id", "chat", "time", "dreamt", "dreamt_time"})
 KEPT_WHOLE = EPISODE_BOOKKEEPING | {"status"}
 DREAM = "dream"
+STARTER_TOOLS = (
+    ("how much free disk space is left", "df -h ~"),
+    ("how big is this folder", "du -sh ~"),
+    ("list the files by size", "ls -lS ~"),
+    ("what are the biggest files here", "du -ah ~ | sort -rh | head -n 20"),
+    ("how big is each folder in here", "du -sh ~/*"),
+    ("how many files are in this folder", "find ~ -type f | wc -l"),
+    ("which files are larger than 100 MB", "find ~ -type f -size +100M"),
+)
 GIVEN_ID = r"\b[emtq]\d+\b"
 ID_SEPARATOR = r"\s*(?:,\s*(?:(?:and|or)\b)?|\b(?:and|or)\b)\s*"
 GIVEN_IDS = re.compile(rf"{GIVEN_ID}(?:{ID_SEPARATOR}{GIVEN_ID})*")
@@ -129,6 +138,12 @@ class Memories:
         Home.store().put(self.MEMORIES, memory["id"], memory)
         return memory
 
+    def add_starter_tools(self):
+        kept = {memory["text"] for memory in self.living() if memory["kind"] == "tool"}
+        for gist, line in STARTER_TOOLS:
+            if line not in kept:
+                self.add("tool", gist=gist, text=line, sources=["starter"])
+
     def next_number(self):
         return Home.store().update(self.COUNTER, "last", lambda last: (last or 0) + 1)
 
@@ -138,9 +153,13 @@ class Memories:
     def retire(self, memory_id, why):
         return self.update(memory_id, {"retired": why})
 
+    def candidates(self, kinds):
+        if kinds is None:
+            return self.living() + Scratchpad.fresh()
+        return [memory for memory in self.living() if memory["kind"] in kinds]
+
     def recall(self, request, now=None, kinds=None):
-        living = [memory for memory in self.living() if kinds is None or memory["kind"] in kinds]
-        candidates = living + Scratchpad.fresh()
+        candidates = self.candidates(kinds)
         found = [
             candidates[index] for index in self.hits(request, [recall_text(item) for item in candidates])
         ]

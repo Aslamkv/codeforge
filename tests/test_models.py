@@ -248,6 +248,19 @@ def test_a_quick_reply_stopped_at_length_comes_back_cut(measured_model, fake_oll
 
 
 @pytest.mark.spec("MOD-23")
+def test_a_quick_reply_cuts_a_think_block(measured_model, fake_ollama, tinker_home):
+    fake_ollama.reply({"content": "<think>pondering</think>\n answer ", "done_reason": "length"})
+    reply = Models.quick_reply(HI, 7)
+    assert isinstance(reply, Cut) and reply == "answer"
+
+
+@pytest.mark.spec("MOD-23")
+def test_a_quick_reply_cuts_text_before_a_lone_think_end(measured_model, fake_ollama, tinker_home):
+    fake_ollama.reply("leaked thought\n</think>\nanswer")
+    assert Models.quick_reply(HI, 7) == "answer"
+
+
+@pytest.mark.spec("MOD-23")
 def test_a_quick_reply_asks_at_a_given_temperature(measured_model, fake_ollama, tinker_home):
     fake_ollama.reply("a", times=2)
     Models.quick_reply(HI, 7, temperature=0)

@@ -251,10 +251,7 @@ Or say one thing at a time:
 ```sh
 tinker chat what makes a good unit test
 tinker research the newest Python release
-tinker command show the five biggest files here
 ```
-
-`command` shows the command line first, and runs it only once you agree.
 
 Ask about this computer and the answer comes at once, with no model: `time`, `date`, `disk`, `ram`,
 `battery`, `uptime` or `network`, each one fixed command that changes nothing, giving one short line:
@@ -278,6 +275,35 @@ tinker run @calc-py add 5 2
 ```
 
 In the conversation or a chat, give it input after `<<<`: `/run @calc-py <<< 2+2`.
+
+### Instruct 🛠
+
+Ask Tinker to do something on this computer, in the conversation or a chat:
+
+```
+› /instruct list the biggest files in Downloads
+● I think you meant to do it like this:
+    du -ah ~/Downloads | sort -rh | head -20
+  Am I right?
+```
+
+`/instruct WHAT` makes instruction #N and goes inside it; the prompt becomes `🛠 #N Title ›`. Asking in plain
+words (`how much space do my photos take?`) goes there too, and so does a message that could be either a
+question or something to run. Each proposal is one command line, shown with what it does, what it touches and
+how to undo it. `/confirm` (the "✅ Run" button on Telegram) runs it; anything else you send changes the
+request and gets a new proposal. A read-only line shaped like one that worked before (or one of Tinker's
+starters: free disk space, a folder's size, the biggest files) runs at once. A problem with no clear fix
+(`my downloads folder is a mess`) gets a line that only looks.
+
+Inside, the instruction stays open after a run: a follow-up can use the last output, and each instruction keeps
+the folder its last run ended in (it starts in `~`). `/leave` (or "🚪 Leave") goes out, `/instructions` lists
+them with their last run's state, and `/instructions #3` goes back inside #3. A run that worked after you
+corrected the request is remembered, so the next one like it is right the first time.
+
+A run is a process of its own: Tinker stays free while it runs, and it goes on if Tinker quits. Its result is
+posted to the chat that confirmed it when it ends, even after a restart. Each run's files are in
+`.tinker/instruction/N/R/`: `run.sh` (runnable by hand), `output.log` and the backups. A line that needs a
+terminal or typed input fails, and Tinker says why.
 
 While a job runs, just ask: a chat or a command line pauses it (it saves itself), answers you, and the job
 goes on (see [Jobs](#jobs-)).
@@ -641,6 +667,10 @@ A job that was killed (or the computer restarted) stays in the queue and goes on
 finished job's journal is deleted. While a job runs, the computer stays awake. In a chat, the same commands work
 with a `/`: `/jobs`, `/stop #3`, `/resume #3`, `/queue list`, `/queue stop all`.
 
+An instruction's run ([Instruct](#instruct-)) is not a job and never waits in the queue, but `/jobs` lists the
+live ones after the jobs. Inside its instruction, `/stop` stops it, `/pause` pauses it and `/resume` goes on;
+a run that is gone is never started again by itself: `/resume` shows its line and waits for `/confirm`.
+
 Clear the jobs you are done with (it asks first). They are archived, not deleted: only `tinker jobs archived`
 shows them. An archived job cannot be resumed, and its journal and model call log are deleted:
 
@@ -719,6 +749,10 @@ It never writes outside the project folder, but the code it writes can do anythi
   file size and processes (`sandbox-exec` on macOS; namespaces and Landlock on Linux). Elsewhere they do not run.
 - 🧪 Want builds walled off too? Run Tinker as a separate user, or in a VM or container.
 - 🌐 With `--web`, pages can steer the model. Read the plan before you `confirm`.
+- 🛠 An instruction shows every line with what it does, touches and how to undo it, and runs it only on
+  `/confirm`, except a read-only line shaped like one that worked before. Nothing runs as root (`sudo` isn't
+  supported yet). A line that can't be undone (`rm`, `dd`, `git reset --hard` and the like) is marked ⚠️.
+  What a run touches is copied first, and `/undo` inside puts it back, last run first, after its own `/confirm`.
 - 💬 A paired chat can run commands on your computer. Pair only your own private chat, never a group.
   Keep the bot token secret.
 

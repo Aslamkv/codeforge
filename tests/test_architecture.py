@@ -22,6 +22,7 @@ LAYERS = (
     "system",
     "commands",
     "jobs",
+    "instructions",
     "sandbox",
     "knowledge.checks",
     "chat.ledger",
@@ -174,7 +175,7 @@ def test_only_the_model_web_and_channel_modules_open_connections():
     runners = {
         module_of(path) for path in program_files() if "subprocess.Popen(" in path.read_text(encoding="utf-8")
     }
-    assert runners <= {"workspace", "settings", "desk", "jobs", "skills"}, runners
+    assert runners <= {"workspace", "settings", "desk", "jobs", "instructions", "skills"}, runners
 
 
 def importers_of(module):

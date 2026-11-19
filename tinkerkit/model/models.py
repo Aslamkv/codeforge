@@ -748,7 +748,7 @@ class Models:
             think=quick_think if think is None else ThinkLevels.taken(think, ThinkLevels.values(name)),
             timeout=QUICK_REPLY_TIMEOUT,
         )
-        content = data["message"]["content"].strip()
+        content = Reply(data["message"]["content"]).text
         return Cut(content) if data.get("done_reason") == "length" else content
 
     @staticmethod

@@ -372,6 +372,12 @@ def test_a_list_comes_a_page_at_a_time():
     assert Numbered.page(entries, 3) == Paged([entries[-1]], 3) and Numbered.page([], 1) == Paged([], 1)
 
 
+@pytest.mark.spec("SET-11")
+def test_a_page_past_the_last_gives_the_last_page():
+    entries = list(range(PER_PAGE * 2 + 1))
+    assert Numbered.page(entries, 4) == Paged([entries[-1]], 3) and Numbered.page([], 2) == Paged([], 1)
+
+
 def test_a_missing_page_has_no_mark_and_has_not_changed(tmp_path):
     page = settings.Page(tmp_path / "page.html")
     assert page.seen() is None

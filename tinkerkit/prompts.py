@@ -115,7 +115,54 @@ class Reply:
 
     def json_candidates(self, whole, to_the_end):
         trimmed = to_the_end.rstrip().rstrip("`").rstrip()
-        return [whole, self.balanced(trimmed), self.balanced(self.without_stray_quote(trimmed))]
+        return [
+            whole,
+            self.balanced(trimmed),
+            self.balanced(self.without_stray_quote(trimmed)),
+            self.balanced(self.with_inner_quotes_escaped(trimmed)),
+            self.balanced(self.with_bare_backslashes_doubled(trimmed)),
+        ]
+
+    @staticmethod
+    def with_bare_backslashes_doubled(text):
+        mended, in_string, escaped = [], False, False
+        for offset, char in enumerate(text):
+            mended.append(char)
+            if not in_string:
+                in_string = char == '"'
+            elif escaped:
+                escaped = False
+            elif char == "\\" and not Reply.starts_an_escape(text, offset):
+                mended.append("\\")
+            elif char == "\\":
+                escaped = True
+            else:
+                in_string = char != '"'
+        return "".join(mended)
+
+    @staticmethod
+    def starts_an_escape(text, offset):
+        following = text[offset + 1 : offset + 2]
+        return bool(following) and following in '"\\/bfnrtu'
+
+    @staticmethod
+    def with_inner_quotes_escaped(text):
+        mended, in_string, escaped = [], False, False
+        for offset, char in enumerate(text):
+            if in_string and not escaped and char == '"' and not Reply.closes_a_string(text, offset):
+                mended.append('\\"')
+                continue
+            mended.append(char)
+            if in_string:
+                escaped, in_string = (False, True) if escaped else (char == "\\", char != '"')
+            elif char == '"':
+                in_string = True
+        return "".join(mended)
+
+    @staticmethod
+    def closes_a_string(text, offset):
+        following = text[offset + 1 :].lstrip()
+        return not following or following[0] in ",:}]"
 
     @staticmethod
     def without_stray_quote(text):
@@ -1106,19 +1153,32 @@ Reply with ONLY JSON: {"claims":[{"claim":1,"verdict":"holds","why":"one short s
         "(✅ done or fine, ⚠️ a problem, 💡 a tip, 👉 what to do next); never a heading or a table."
     )
 
-    CHAT_SYSTEM = (
+    CHAT_TALK = (
         "You are Tinker, a friendly helper that builds small programs on this computer with a local model. "
-        "{style} Talk about anything.{state}"
+        "{style} Talk about anything. "
+        "In this chat you only talk: nothing runs, so never say you did, ran, checked, changed or deleted "
+        "anything, and never give shell commands to run."
     )
 
+    INSTRUCT_POINTER = (
+        " When asked to do something on this computer, say to send it as `/instruct` followed by what to do."
+    )
+
+    CHAT_SYSTEM = CHAT_TALK + INSTRUCT_POINTER + "{state}"
+
     CHAT_ROUTE_SYSTEM = (
-        "You pick which of Tinker's commands do what the person asks. The commands, each with what it is "
-        "for:\n"
-        "{index}\n"
-        "Asked how to use one of Tinker's commands is `/help` (`/help` for `how do I learn a skill?`), "
-        "asked how to do anything else is `none`. "
+        "You pick which of Tinker's commands do what the person asks. "
+        "Asked how to use one of Tinker's commands is `/help` (`/help` for `how do I learn a skill?`). "
+        "Asked to do something on this computer that no command does, or how to do it there (look at, "
+        "list, measure, change or run something in its files, folders or terminal), is `/instruct`; "
+        "a question about what is on this computer is `/instruct`, and so is a problem stated with no "
+        "request (`/instruct` for `my downloads folder is a mess`) and a message unsure between running "
+        "something and answering. `none` is only for wanting words alone, such as knowledge (`none` for "
+        "`what is a black hole?`, never `/knowledge`, which browses what Tinker learned) or how to do "
+        "something away from this computer (`none` for `how do I fold a fitted sheet?`). "
         "Reply with only the command names, one per line, and nothing else, where only RAM means "
-        "`/system ram`, or `none` when no command does it."
+        "`/system ram`, or `none`."
+        "\nThe commands, each with what it is for:\n{index}"
     )
 
     TRAITS = "Who the person is and how they want you to be"
@@ -1142,6 +1202,11 @@ Reply with ONLY JSON: {"claims":[{"claim":1,"verdict":"holds","why":"one short s
         "Add what is new, update a memory the episodes correct, confirm one they show again and retire one "
         "they show is wrong. Every change cites the ids of the episodes that show it. Leave a list empty "
         "when nothing fits. Give every episode one short gist keeping its numbers, names and conclusion. "
+        "An episode where Tinker ran no command is gisted as what Tinker said (advice, an answer), never as "
+        "an action it took, even when the reply names a command: a reply suggesting rm is advice, not "
+        '"Deleted". '
+        "An episode with routed lines is gisted as the command Tinker chose, never as its result: it has "
+        "not run yet. "
         "For each episode id in questions, say how long its answer holds: always for a fact that does not "
         "change (a mountain's height, a date in history), month for one that changes slowly (a price, a "
         "version), day for news or weather, never for what is read off right now (the time, the RAM)."
@@ -1294,9 +1359,21 @@ Reply with ONLY JSON: {"claims":[{"claim":1,"verdict":"holds","why":"one short s
 
     COMMAND_SYSTEM = (
         "The person describes a command they want run on their computer ({system}, shell {shell}, in the "
-        'folder {folder}). Reply with ONLY JSON: {{"command": "the one command line that does it", '
-        '"does": "what it does, in one short sentence"}}, or {{"command": "", "does": "why no '
-        'single command fits"}} when the description is unclear or asks for no command.'
+        "folder {folder}). The conversation so far comes labelled by turn: the request, your proposals, "
+        "their amends and the outputs of lines run; the last turn is what to answer now. Reply with ONLY "
+        'JSON: {{"line": "the one command line that does it", "does": "what it does, in one short '
+        'sentence", "touches": ["each path the line changes or creates"], "undo": "the line that reverses '
+        "it, or can't be undone\"}}. Always give a line: a problem stated with no request, or one whose fix "
+        "is unclear, gets a line that only lists or measures what it names (`du -sh`, `ls -la`), never one "
+        "that changes or deletes. Prefer lines that can be reversed: trash rather "
+        "than rm, mv -n and cp -n rather than overwriting, >> rather than >. Never use root: no sudo, su, "
+        "doas or administrator privileges. Use only flags this system's own tools take."
+    )
+
+    MACOS = "macOS, whose BSD tools have no GNU-only flags such as --block-size or --time-style"
+
+    COMMAND_RECALLED = (
+        "When a line under What you remember fits, reply with that line as it is, changing only its paths."
     )
 
     COMMAND_TELL_SYSTEM = (

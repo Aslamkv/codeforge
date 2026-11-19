@@ -74,6 +74,8 @@ with a dot, and each imports only the modules listed above it:
 | `system` | what this computer tells at once by fixed read-only commands, with no model (`SystemCheck`, `SYSTEM_CHECKS`) |
 | `commands` | the one table of Tinker's commands with each one's kind (`kind_of`, `deletes`), the command a chat message names (`command_of`, `command_words`), and project references (`@ID`, `@folder`) |
 | `jobs` | every long command as a job, listed, stopped and resumed (`Jobs`), its journal of requests and answers (`Journal`, `journaled`), and its log of model calls (`calls_log`) |
+| `instructions` | the instructions kept in the home (`Instructions`) and each confirmed command line run detached, watched, paused, stopped and undone from its backups (`Run`) |
+| `instructions` | what the person asks Tinker to run on this computer: each instruction and its thread (`Instructions`), and a run started on its own, watched and signalled (`Run`) |
 | `chat.ledger` | what is said in the chats, so a chat is only a view of it: each message with when it goes, each thing shown, numbered, for `history` (`Ledger`) |
 | `prompts` | prompt parts (`Part`), replies (`Reply`), every system prompt (`Prompts`) |
 | `workspace` | the project's files and the commands run in it (`Workspace`, `Toolchain`, `TestRef`, `Output`, `FileView`, `TaughtCommands`) |
@@ -89,7 +91,7 @@ with a dot, and each imports only the modules listed above it:
 | `skills` | a command of the person's learned as a skill, run from a chat and its result handed back (`Skill`, `Skills`, `SkillLearner`, `SkillRun`) |
 | `chat.markup` | what a message is and how it is written for each place it shows (`Message`, `Markup`, `md`, `styled`) |
 | `chat.console` | the terminal as a chat: the channel contract every chat follows (`Channel`, `ChannelError`), the console channel and its prompt and screen (`ConsoleChannel`, `PromptDrawer`, `ConsoleScreen`) |
-| `chat.shell` | shell commands run from a chat (`Shell`) |
+| `chat.shell` | an instruction's command lines: proposed from its thread, checked before they are shown, backed up and run (`Shell`, `Checked`) |
 | `chat.reports` | a job followed in the chats it was asked from: its message, progress and ending (`Reporter`, `Progress`, `Attached`) |
 | `desk` | the terminal and the chats as one conversation (`Desk`, `Talk`), the plan that waits for the person (`WaitingPlan`), and one command said once (`one_shot`) |
 | `chat.channels` | the chat plugin: Telegram, and `tinker channel` |
@@ -143,6 +145,7 @@ The Tinker home (**SET-1**) holds:
 | `memory.html` | the page of episodes and memories `memory graph` sends in a conversation (**DRM-9**) |
 | `reading/` | each kept file, as `FINGERPRINT.EXT` (**RDG-6**) |
 | `skills/` | a folder of its own for each skill run, its trial included (**SKL-4**) |
+| `instruction/` | `N/R/` for run R of instruction #N: its `run.sh`, `output.log`, `state`, `ended`, `folder`, `stopped` and backups (**INS-4**) |
 
 The home database holds these collections and logs. `tinker clear PART` deletes a part (**SET-9**), named in
 the last column:
@@ -173,6 +176,7 @@ the last column:
 | log `journal #N` | job #N's requests (model calls, web searches, page fetches) with their answers, until it finishes | `jobs` |
 | `job queue`, `job runner` | the job numbers in the queue, head first (**JOB-8**); the process that runs it (**JOB-9**) | `jobs` |
 | log `output #N` | what job #N printed as the runner ran it (**JOB-9**), until the job is archived | `jobs` |
+| `instructions`, `instruction numbers` | every instruction: its number, title, request, thread, working folder and runs (**INS-1**); the last number given | |
 | `episodes` | what each chat request, command line and build did (**REM-1**) | |
 | `memories` | what the dream kept of the episodes (**REM-3**) | |
 | `traits` | who the person is and who Tinker is for them (**REM-5**) | |
@@ -180,7 +184,7 @@ the last column:
 | `dream` | the dream's last state (`state`), with the reflection's last thoughts (**DRM-11**) | |
 | log `dream events` | every change a dream made (**DRM-7**) | |
 
-Jobs, readings and the chat history are numbered lists (`Numbered`, **SET-11**). `#N` names an entry. A list
+Jobs, readings, instructions and the chat history are numbered lists (`Numbered`, **SET-11**). `#N` names an entry. A list
 shows them newest first, a page at a time, and a page that has more after it names the command for the next.
 On a channel with buttons (Telegram) that page also gets a "Next page ›" button whose tap sends that command. In
 the terminal, the page's last line is a dim `↵ next page`, and an empty line sent right after it sends that
@@ -354,7 +358,7 @@ The home and its database, the settings, numbered lists, and the one way to dele
   entry under the next number (its `number`), and a number is never given again, even once its entry is
   deleted or its list cleared. `get(N)`, `put(entry)`, `update(N, change)` and `delete(N)` work as named, and
   `newest()` gives the entries newest first. `page(entries, N)` gives page N of the entries, `PER_PAGE` (10) to
-  a page, with how many pages there are (at least one).
+  a page, with how many pages there are (at least one); a page past the last gives the last page.
 
 ## system (SYS)
 
@@ -418,7 +422,7 @@ again what it did. Jobs wait in one queue and only its head runs (**JOB-8**); wh
 goes to the front, so the person is always answered first.
 
 - **JOB-1** `is_job(argv)` is true for a command of kind `job` or `pauses` (**CMD-1**): `task`, `restart`, `resume`,
-  `confirm`, `amend`, `add`, `fix`, `model calibrate NAME`, `model recipe all`, `learn`, `ask`, `teach`, `read`, `research`, `exercise`, `chat`, `command WHAT`, `dream run` and `skill` (`skill learn` and a skill's use). Help,
+  `confirm`, `amend`, `add`, `fix`, `model calibrate NAME`, `model recipe all`, `learn`, `ask`, `teach`, `read`, `research`, `exercise`, `chat`, `dream run` and `skill` (`skill learn` and a skill's use). Help,
   and a build an exercise runs (`EXERCISE_ENV`, which holds the exercise's job number), are never jobs. A job keeps the
   computer awake while it runs (**SET-10**). `Jobs.running(argv)` makes a job the next number (`#1`, `#2` ...), kept in
   the home's `jobs` with its command, title, arguments, the day it started, its state, its process and its tracker
@@ -450,14 +454,16 @@ goes to the front, so the person is always answered first.
   ones. Any other words are an error. `tinker jobs #N` shows job #N's view: its number, state and title, then
   what it has printed so far (log `output #N`), its last `JOB_OUTPUT_LINES` lines, saying how many earlier ones
   are left out, or that it has printed nothing yet, or, archived, that its output is gone. An unknown job is an
-  error. In a chat, `/jobs #N` enters the job (**CNV-25**).
+  error. In a chat, `/jobs #N` enters the job (**CNV-25**), and `/jobs` also lists the live instruction runs
+  (**INS-6**).
 - **JOB-7** `tinker stop #N` takes job #N out of the queue and, if it runs, sends it `JOB_STOP_SIGNAL`, as
   Ctrl-C (one not in the queue is an error); `tinker stop` stops the job that runs, whatever it is, a chat's
   answer too. In the conversation, `/stop #N` stops that job (the task started here, the exercise in its own
   message, or one elsewhere) and `/stop` the job that runs, and `/resume [#N]` starts `tinker resume #N` as a
   job (an exercise as the exercise). A stopped job never goes on by itself. `queue list` (`tinker queue list`,
   `/queue list`) lists the queue in order, its head first; `queue stop #N` is `stop #N`; `queue stop all` stops
-  the job that runs and takes every job out.
+  the job that runs and takes every job out. Inside an instruction, `/stop` and `/resume` act on its run instead
+  (**INS-6**).
 - **JOB-8** The home keeps one queue (`Queue`): an ordered list of job numbers, and only its head runs. A job is added
   at the front (whatever the person asks for). The head a new front pushes back is sent `JOB_STOP_SIGNAL`: it saves
   itself, its process ends, and it stays queued, second. A job leaves the queue when it ends or is stopped. No rule
@@ -491,6 +497,79 @@ goes to the front, so the person is always answered first.
   `teach`, `read`, `research` and `exercise` give it to their model and to `say` (`detail`, **MSG-5**);
   calibration (`model`) calls Ollama directly and keeps none.
 
+## instructions (INS)
+
+What the person asks Tinker to do on this computer is an instruction: one command line proposed at a time, run
+only after `/confirm`, never as root, with a way back kept. A run is a process of its own that Tinker only
+starts, watches and signals: it never blocks Tinker, and it outlives it.
+
+- **INS-1** `/instruct WHAT` makes instruction #N (`Numbered`, **SET-11**: its title, request, thread, working
+  folder and runs) and enters it (**CNV-25**); `/instruct` alone asks for WHAT (**CNV-11**). `/instructions
+  [PAGE]` lists them (#N, title, its last run's state); `/instructions #N` enters #N; an unknown one is an error.
+  An instruction's working folder starts as `~`; each run's `run.sh` keeps the folder it ended in for the next
+  proposal.
+- **INS-2** Inside an instruction, a plain message is its thread's next turn: `Shell.propose(thread)` sends the
+  whole thread (the request, the proposals, the amends and the earlier outputs, each cut to
+  `EPISODE_FOUND_CHARS`) with the recalled `tool` memories (**REM-6**), and reads the JSON `{line, does, touches,
+  undo}`, `undo` being the line that reverses it or `can't be undone`; a missing `undo` is no undo line, shown as
+  putting back the backups of what it touches (nothing to undo when it touches nothing), never as ⚠️ "can't be
+  undone", which only the model's own `can't be undone` or **INS-3** gives. All four are shown, the line as a guess
+  ("I think you meant to do it like this:", the line in a code block, "Am I right?") above the rest, and the line
+  waits for `/confirm` (**CNV-10**) unless it runs at once (**INS-9**). A message sent while a line waits cancels it quietly and is the amend. A reply that
+  cannot be read (**PRM-2**) gives no line and says the model's answer could not be read, never that no command
+  was found. An empty or multi-line line gives no line and says so, as does a line whose first word is no command (not
+  found on `PATH`, not a shell builtin or keyword), such as the model's prose. The prompt always asks for a line:
+  a problem stated with no request (`my downloads folder is a mess`), or one whose fix is unclear, gets a line that
+  only looks at what it names (lists or measures it), never a change and never no line. After a run the instruction stays open, and a
+  follow-up's proposal can use the last output.
+- **INS-3** `Checked(line)` reads the line with `shlex`, with no model, before it is shown. A root line (`sudo`,
+  `su`, `doas`, `osascript … with administrator privileges`) is refused with "sudo isn't supported yet" and
+  nothing waits. An irreversible verb (`rm`, `dd`, `>` onto an existing file, `git reset --hard`, `git push
+  --force`, `kill`, `chmod -R`, `find -delete`, and `find -exec`, `-execdir`, `-ok` or `-okdir` running one of
+  them) overrides the model's undo: the line is shown with ⚠️ "can't be undone" and still runs on `/confirm`. A
+  read-only line has every command (each part between `|`, `&&`, `||` and `;`) in
+  `READ_ONLY_COMMANDS` (`ls`, `du`, `df`, `stat`, `wc`, `cat`, `head`, `tail`, `file`, `sort`, `uniq`, `grep`,
+  `pwd`, `find` without `-delete`, `-exec`, `-execdir`, `-ok` or `-fprint`, and the like), no redirection and no
+  command substitution. A redirection onto `/dev/null` or onto another output (`2>&1`) writes nothing: it is
+  neither a redirection here nor `>` onto an existing file. The prompt prefers `trash`, `mv -n`, `cp -n` and `>>`, and forbids root.
+- **INS-4** `/confirm` starts the line (`Run.start`) in run folder `instruction/N/R/` (a Home method, **ARCH-4**):
+  `run.sh` (the line run in the instruction's folder with `set -o pipefail`, so a pipe whose part fails ends with
+  that failure, runnable by hand), `output.log`, `state` (pid, start time),
+  `ended` (exit code) and `folder` (where it ended), both written by the run itself, `stopped` after a stop (**INS-6**), and the backups: each existing path in `touches` cloned with `cp -c`; past `BACKUP_MAX_BYTES` (1 GB)
+  none is made and the run is irreversible. The process starts in a session of its own (`start_new_session`),
+  stdin `/dev/null`, kept awake by `caffeinate -w PID` (**SET-10**), and starting returns at once. Nothing is
+  written where the line runs. A line that needs a terminal or input fails, and Tinker says why: a run's output
+  is kept without terminal escape sequences, and a failed run whose output set terminal modes (a private-mode
+  sequence such as `ESC[?` or `ESC[>`, which colours never use) is posted with the reason that runs have no
+  terminal instead of its output. Each run is an
+  episode (**REM-1**).
+- **INS-5** A run is not a job: it never enters the queue (**JOB-8**). The desk's tick (**CNV-7**) watches the live
+  runs (`Run.ended`: its `state`, and `alive(pid, began)` as **JOB-2**) and posts each one's exit code and folded
+  output to the chat that confirmed it. On start, Tinker re-attaches to live runs and posts the ones that ended
+  meanwhile. A run gone without an exit code ended unknown, and is never run again by itself.
+- **INS-6** `/jobs` lists the live runs after the jobs (#N, title, `running` or `paused`, time). Inside an
+  instruction, `/stop` stops its run (TERM to its process group, KILL after `RUN_STOP_GRACE_SECONDS`), `/pause`
+  pauses it (SIGSTOP) and `/resume` goes on (SIGCONT); `/resume` of a run that is gone shows its line and waits
+  for `/confirm`. A stop leaves `stopped` in the run folder, and a stopped run without an exit code is posted
+  as stopped (⏹), not as unknown. Outside an instruction, `/pause` says it works inside one.
+- **INS-7** `/undo` inside an instruction undoes its last run not undone yet (a stack): it stops a live one first,
+  then a preview lists the backups put back (each path changed since the run marked as overwritten) and the undo
+  line, and waits for `/confirm`. With nothing to undo, or an irreversible run (an **INS-3** irreversible line, or
+  no backups past `BACKUP_MAX_BYTES`), it says so; a run whose undo is the model's `can't be undone` puts back its
+  backups with no undo line, and one with neither backups nor an undo line has nothing to undo and is never on the
+  stack. An irreversible run, once refused, is passed (marked so), so the next `/undo` reaches an older run. The undo
+  line's own run is never on the stack, so each further `/undo` reaches an older run; an undo with no line logs no
+  proposal.
+- **INS-8** A confirmed run that ends with exit code 0 is kept as a `tool` memory (its gist the request, the
+  corrected one after an amend, its text the line, its source the run's episode); an undo's run and a run started
+  at once (**INS-9**) are not. Being inside an instruction does not outlive a restart.
+- **INS-9** A proposed line that is read-only (**INS-3**) and has the shape of a recalled `tool` memory's line
+  (the same words once path arguments, words holding `/` or `~` or naming an existing path, are left out of both)
+  runs at once, with no `/confirm`: it is shown as "Running:" and the line, and its run is like a confirmed one.
+  Any other line is a guess that waits. Tinker's starter `tool` memories (`STARTER_TOOLS`: read-only lines for
+  free disk space, a folder's size, files by size, the biggest files, counting files and the like, source
+  `starter`) are added to the store on a start that lacks them (matched by text).
+
 ## chat.ledger (LED)
 
 What is said in the chats, kept so that a chat is only a view of it.
@@ -510,7 +589,10 @@ What is said in the chats, kept so that a chat is only a view of it.
 - **PRM-2** `Reply.json()` gives the JSON object in the reply, with prose around it allowed: the first whole
   object that parses from an outermost `{`, so braces in the prose before or after it do not matter. Only when none does, it
   does not parse, it closes brackets the reply left open: before a closing bracket further out, and at the
-  end; and it drops a quote standing between two closing brackets (`]}"}` as `]}}`). No object is a `ValueError`. What cannot be mended raises the reply's own `JSONDecodeError`, so the
+  end; it drops a quote standing between two closing brackets (`]}"}` as `]}}`); and it escapes a quote inside a
+  string value that the next non-space character (`,`, `:`, `}` or `]`) does not show to close it (`"find -name
+  "*.log""` as `"find -name \"*.log\""`); and it doubles a backslash inside a string that starts no JSON escape
+  (`"-exec mv {} notes/ \;"` as `"-exec mv {} notes/ \\;"`). No object is a `ValueError`. What cannot be mended raises the reply's own `JSONDecodeError`, so the
   caller asks again. Given the system prompt, `Reply.json(system)` leaves out each string the reply copied from
   that prompt's own JSON example (a quoted value of two or more words), as if the model gave nothing there: a list
   loses the item, an object the field; an object left empty goes too. The dream and interview calls give it.
@@ -728,7 +810,8 @@ What is said in the chats, kept so that a chat is only a view of it.
   setting (`false` for a thinking model, else none).
   `Models.quick_reply(messages, tokens, think, temperature)` sends one chat with them, at `think` as the model takes it
   (**RVW-2**) and at `temperature` when each is given, `keep_alive`, `num_predict` `tokens` and `QUICK_REPLY_TIMEOUT`,
-  and gives the reply's content, stripped. An Ollama failure is its `OllamaError`. Nothing else outside `Model`, the
+  and gives the reply's content as `Reply` reads it (think blocks and anything before a lone `</think>` cut),
+  stripped. An Ollama failure is its `OllamaError`. Nothing else outside `Model`, the
   quick call, an unload and calibration calls `Ollama.chat`. A user message may carry `images` (each base64), sent as
   they are. `Models.senses()` gives what the quick model takes besides text, from its `capabilities` (`/api/show`):
   `vision` and `audio`; none when no model is in use or Ollama does not say.
@@ -1069,7 +1152,8 @@ The terminal and the chats are one conversation: the same commands, the same ans
   command a message starts with, by the command table, only when its first word is `/` and a command's name, whatever
   words follow (a command refuses words it does not take). A menu's form is taken too: `@bot` after the name (in a
   group) is dropped. A `/` word that names no command is answered `❓ No command /WORD: /help lists them`, and nothing
-  else is done. A message without the `/` is a command too when it says one of the table's fixed phrases, with no model:
+  else is done; a first word holding another `/` after its first (`/tmp/b is a mess`) is a path, not a command, and the
+  message is a plain one. A message without the `/` is a command too when it says one of the table's fixed phrases, with no model:
   `said_command(text)` gives it as `/PHRASE`, else `""`. A chat command's fixed phrases come from its rows' synopses:
   the name, then for each `|` alternative its words, where an optional `[...]` part is left out or, when it holds only
   lowercase words, gives one of them; an alternative with a required placeholder (an uppercase word, `@`, `#`, `"`)
@@ -1169,11 +1253,12 @@ The terminal and the chats are one conversation: the same commands, the same ans
   that sends a command that starts or goes on with a job (a `job` command, `/confirm`, `/amend`, `rename`, `resume`,
   `exercise LANGUAGE`) is that step's asker: only it sees the job's progress, its ending and the plan that waits; every
   other conversation, another chat on the same channel too, sees only the status.
-- **CNV-10** Each chat has at most one question that waits for the person (a deletion, a chat's `/exit`, a command line,
-  words a command needs), kept in one place by channel and chat: what its answer runs and what a cancel says.
-  `Desk.settle` runs what waits for a `/confirm`. Any other message cancels it and says so at once, before that
-  message is answered; a question with nothing to
-  say on a cancel (words a command needs) is dropped quietly. The plan that waits is not such a question: every chat and
+- **CNV-10** Each chat has at most one question that waits for the person (a deletion, a chat's `/exit`, an
+  instruction's proposal, words a command needs), kept in one place by channel and chat:
+  what its answer runs and what a cancel says. `Desk.settle` runs what waits for a `/confirm`. Any other message
+  cancels it and says so at once, before that message is answered; a question with nothing to say on a cancel
+  (words a command needs) is dropped quietly, and so is a proposal a message inside its instruction cancels, that
+  message being the amend (**INS-2**). The plan that waits is not such a question: every chat and
   the terminal share it and can answer it, though only its asker sees it; the others see the status that says it waits.
   `decide` builds or changes the plan that waits. For a new project, its first `confirm` asks for the folder's name.
 - **CNV-11** A command that needs words, sent alone (as a chat app's menu sends it: `/fix`), asks for them (`ask_for`:
@@ -1220,20 +1305,30 @@ The terminal and the chats are one conversation: the same commands, the same ans
   failed. Each prompt holds only what its message needs. The channel's class picks how replies are written
   (`STYLE`): a Telegram chat is read on a phone (brief, short lines), the console is a terminal; both render
   Markdown. Tinker acts on what the person asks rather than saying what to type, in steps.
-  First a route call (`CHAT_ROUTE_SYSTEM`, think `off`, temperature 0, a short reply) gets only the thread, the message and
-  the index: the commands a chat offers, grouped as in `help`, each with what it is for, from its `what`
+  First a route call (`CHAT_ROUTE_SYSTEM`, think `off`, temperature 0, a short reply) gets only the message and
+  the index, never the thread: the commands a chat offers, grouped as in `help`, each with what it is for, from its `what`
   (`/skill — learn a shell command, alias, script or program as a skill, and list or forget the skills`), and the skills, one line
   each (`/skill NAME — purpose`, **SKL-1**), only when there are some. It replies with only the command names,
   one per line, where only RAM means `/system ram`, or `none`; asked how to use one of Tinker's commands is `/help`
-  (`/help` for `how do I learn a skill?`), asked how to do anything else is `none`. A line names the command (or
+  (`/help` for `how do I learn a skill?`), asked to do something on this computer that no command does, or how to
+  do it there (look at, list, measure, change or run something in its files, folders or terminal), is
+  `/instruct`, and so is a message unsure between running something and answering; only a wish for words alone
+  (knowledge, such as `what is a black hole?`, never `/knowledge`, which browses what Tinker learned; how to do
+  something away from this computer) is `none`. A routed `/instruct MESSAGE` enters the
+  instruction like a typed one, and its proposal is the guess (**INS-2**): a `/cancel` of that first proposal
+  shows `🚫 Not run` and leaves the instruction, and nothing more is said about the message: no answer in
+  words follows. A line names the command (or
   skill) its leading words name, with or without `/`; words after the name are ignored (`skill learn mgen` names
   `/skill`, `runs` names `/runs`). A reply with a line that names none is read as `none`. With
   `none`, the answer call (`CHAT_SYSTEM`) holds the style and the live state only when there is some: what
-  runs now and the plan that waits, and no commands; a plain question is answered there, at the message's
+  runs now and the plan that waits, and no commands but `/instruct`: it says nothing runs there, so the answer never
+  claims an action and never gives shell commands to run, and points to `/instruct` for one, as the prompt's
+  last rule; a plain question is answered there, at the message's
   level (**RVW-3**). When it thinks, its `num_predict` is the reply budget plus a thinking budget; an empty
   answer after a stop at length is asked once more without thinking, and an answer cut off at length is shown
   but kept as no episode (**REM-1**). A named command that takes no
-  words runs at once; otherwise a fill call (`CHAT_FILL_SYSTEM`, think `off`, temperature 0) gets the same messages, each named
+  words runs at once, and a named `/instruct` runs at once as `/instruct MESSAGE`, the message as sent; otherwise a
+  fill call (`CHAT_FILL_SYSTEM`, think `off`, temperature 0) gets the thread and the message, each named
   command's synopses and descriptions, and only the state those commands use: the channels and whether
   Tinker listens on each for `channel`, the model in use for `model`, what runs and waits for the job
   commands, the plan that waits for `confirm`, `amend` and `rename`, and the known projects (`@ID`, folder,
@@ -1246,9 +1341,9 @@ The terminal and the chats are one conversation: the same commands, the same ans
   once mgen is a skill (two separate examples, never one reply of both lines), `/help skill` for `how do I learn
   a skill?`; a value of several words for a skill's slot that is not its last is quoted. Words a
   command requires that the person did not give are asked for (**CNV-11**), never invented; a request that
-  could mean two things gets one question back, and one that is fairly clear is acted on at once. Asked how to
-  do it, it answers in words. A fill reply's line that `command_of` gives a command for, but whose command (or
-  skill) the route call did not name, is dropped; a reply left with no line runs the route call's lines as it gave them
+  could mean two things gets one question back, and one that is fairly clear is acted on at once. A fill reply
+  keeps only its lines that start with `/` and that `command_of` gives a command (or skill) for that the route
+  call named; any other line is dropped; a reply left with no line runs the route call's lines as it gave them
   instead, each with `/` added when it has none. A reply whose every line, with or without backticks, is one that `command_of`
   gives a command for is not shown, and neither is a glance's line inside a sentence. Each such line runs at
   once, in turn, with no offer to confirm: a deletion still asks first (**SET-8**) and a build still waits at
@@ -1258,15 +1353,14 @@ The terminal and the chats are one conversation: the same commands, the same ans
 - **CNV-19** A chat or a command line is a job at the front (**JOB-1**, **JOB-8**); while it pushes back the
   job that ran (`Talk.pausing_jobs`), its note says which job that is, and that it goes on once they have
   their answer.
-- **CNV-20** `Shell.propose` gives one command line to confirm, with a warning when it changes or deletes
-  things. It gives no command for an empty, multi-line or failed reply. `take` hands the proposal over once.
-  `run` runs it in the person's shell and shows the exit code and output.
+- **CNV-20** `Shell` serves an instruction: `propose` gives one command line from its thread (**INS-2**),
+  checked before it is shown (**INS-3**); `take` hands the proposal over once; `run` starts it (**INS-4**); and
+  `folded` shows a run's exit code and output.
 - **CNV-21** `run [@PROJECT] ARGS [<<< INPUT]` runs a built project the way a person runs it: its run command,
   in its folder and environment, with the arguments quoted and the input given after `<<<`. The project is the
   one named, else the one built last. With no project built, or one with no run command, it says so.
-- **CNV-22** `one_shot` says one of the conversation's commands once, in the terminal (`tinker chat`,
-  `command`, `run`, `history`). Each needs words after it, except `run` and `history`. `chat` and
-  `command` are jobs (**JOB-1**). `command` runs nothing without a yes at the terminal.
+- **CNV-22** `one_shot` says one of the conversation's commands once, in the terminal (`tinker chat`, `run`,
+  `history`). `chat` needs words after it and is a job (**JOB-1**).
 - **CNV-23** `knowledge graph` in a conversation makes the page (`tinker knowledge graph`) and sends it with
   `send_file`, what tinker printed as its caption; `memory graph` and `dream graph` send `memory.html` the same
   way (**DRM-9**). The terminal opens the file in the browser and says where it is; a channel that cannot send
@@ -1276,8 +1370,8 @@ The terminal and the chats are one conversation: the same commands, the same ans
   to send `/fresh`; on a channel with buttons (Telegram) it also gets a "🔄 Fresh answer" button whose tap
   sends `/fresh`; an edit of that reply keeps the button. The dream then updates the old answer memory with the
   new answer.
-- **CNV-25** A chat is in at most one mode at a time, inside a reading, in the interview (**INT-1**) or inside a
-  job: entering one leaves the other, and `/leave` leaves any. `/jobs #N` enters job #N while it is in the queue:
+- **CNV-25** A chat is in at most one mode at a time, inside a reading, in the interview (**INT-1**), inside a
+  job or inside an instruction: entering one leaves the other, and `/leave` leaves any. `/jobs #N` enters job #N while it is in the queue:
   one message shows its view (**JOB-6**) and is edited every `PROGRESS_EDIT_SECONDS` seconds while what it printed
   grows, so the job runs in front of the person; a plain message and a `/command` are answered as outside. When
   the job leaves the queue its message shows its last lines and how it ended, and the chat leaves the job; a job
@@ -1290,6 +1384,11 @@ The terminal and the chats are one conversation: the same commands, the same ans
   and so does entering another or deleting it (**RDG-15**). The terminal's prompt is `📕 #N Title ›` while
   inside; on a channel with buttons (Telegram) each answer inside gets a "📕 Leave #N" button whose tap sends
   `/leave`, as **CNV-24**'s button does. Being inside is kept per chat while Tinker runs, and a restart leaves it.
+  The fourth mode is inside an instruction (**INS-1**): a plain message there is its thread's next turn
+  (**INS-2**), never read as a said command (`run it` is a turn, not `/dream run`), and a `/command` still runs. The terminal's prompt is `🛠 #N Title ›` while inside; on a channel
+  with buttons each proposal gets a "✅ Run" button whose tap sends `/confirm` and a "🚪 Leave" button whose tap
+  sends `/leave`. Only the person changes the mode: a `/command` the model names answering a message sent
+  before the chat's mode changed is not run.
 - **CNV-26** A terminal message that is the path of an existing file (quoted, or with its spaces
   backslash-escaped, as a file dropped on the terminal gives it) is `read PATH`. A path followed by words keeps
   the file, enters it (**CNV-25**) and answers the words inside it.
@@ -1663,9 +1762,10 @@ What the person and Tinker did together, kept as episodes, and the memories a dr
 Nothing here calls the model.
 
 - **REM-1** `Scratchpad.write(episode)` keeps one episode in `episodes` for each chat request (`Talk.answering`:
-  the message, the commands it ran, their output cut to `EPISODE_FOUND_CHARS`, the reply, and `answered`,
-  `remembered` (answered from memory, **REM-12**) or `failed`), each command line run (`Shell.run`: the request, the line, its output cut the same way, its exit
-  code), and each build when it ends (its task and status); a chat answer cut off at length is not kept
+  the message, the commands it ran, their output cut to `EPISODE_FOUND_CHARS`, the /-lines the route named as
+  `routed` (chosen, never counted as run), the reply, and `answered`,
+  `remembered` (answered from memory, **REM-12**) or `failed`), each instruction run once it ends (**INS-4**: the request, the line, its output cut the same way, its
+  exit code), and each build when it ends (its task and status); a chat answer cut off at length is not kept
   (**CNV-18**). An episode has the next id `eN`, its chat, its time
   and `dreamt` false. A `system` check's output (**SYS-1**) is never kept.
 - **REM-2** A dreamt episode keeps only its gist: the gist the dream wrote for it (**DRM-3**), else its texts
@@ -1679,7 +1779,8 @@ Nothing here calls the model.
 - **REM-4** `Memories.recall(request)` gives the memories not retired and the fresh episodes (not dreamt) that
   hold a word of the request (BM25), or, when the embedding model is set, whose meaning is at least
   `RECALL_MEANING` (cosine) close; in rank order, at most `RECALL_SHOWN` (6). Each memory recalled gets
-  `recalled` one higher and `last_recalled` now.
+  `recalled` one higher and `last_recalled` now. Asked for some kinds, it gives only the memories of those kinds,
+  never episodes.
 - **REM-5** A trait in `traits` is `{id, about, when, do, gist, status, sources, history}`: id `tN`, `about`
   `person` (who the person is: work, goals, likes) or `tinker` (who Tinker is for them: role, duties, tone, how it
   builds), `when` the situation it holds in (`""` always), `do` the trait as said, `gist` its shortest wording
@@ -1687,8 +1788,8 @@ Nothing here calls the model.
   `{event, at, text}`. Its status is `candidate` (proposed by a dream, never shown to a model), `confirmed` (the
   person said yes) or `retired` (with why). Only the person changes a status: a build never retires a trait.
 - **REM-6** `Talk.reply` adds "What you remember" (each recalled line) to `CHAT_SYSTEM` only
-  when there is some; `Shell.propose` adds the recalled `tool` memories and episodes to `COMMAND_SYSTEM` the
-  same way. With nothing recalled, the prompt is unchanged. The model answers unless an answer memory does (**REM-12**).
+  when there is some; `Shell.propose` adds the recalled `tool` memories (never episodes: the instruction's thread
+  holds its own history) to `COMMAND_SYSTEM` the same way. With nothing recalled, the prompt is unchanged. The model answers unless an answer memory does (**REM-12**).
 - **REM-7** `tinker memory [PAGE]` lists the memories not retired, newest `last_seen` first, a page at a time,
   each as its id, kind and gist; then how many episodes are fresh, how many memories are retired, when the last
   dream was, and what to do next (`memory show ID`, `memory forget ID`, `memory traits`, `dream`). With no memory,
@@ -1792,8 +1893,11 @@ the person (**INT**).
   commands, output, status), so a person memory rests only on the person's own words.
   `DREAM_CONSOLIDATE_SYSTEM` gets the batch and the memories it recalls (**REM-4**), and answers JSON
   `{add, update, confirm, retire, gists}`, each change citing episode ids of the batch; `gists` maps each
-  episode id to a short gist keeping its numbers, names and conclusion (**REM-2**). The code picks the episodes that
-  may become answers, a question answered in words (no command run, not answered from memory), and names them
+  episode id to a short gist keeping its numbers, names and conclusion (**REM-2**); an episode answered in words
+  (no command run) is gisted as what Tinker said, never as an action it took, even when its reply names a
+  command (`rm …` in a reply is advice, not "Deleted"); a routed episode is gisted as the command Tinker chose,
+  never as its result. The code picks the episodes that
+  may become answers, a question answered in words (no command run, none routed, not answered from memory), and names them
   in the batch as `questions`; the model gives each only its `lasts` (`{lasts: {id: lasts}}`): always for a fact
   that does not change (a mountain's height, a date in history), month for one that changes slowly (a price, a
   version), day for news or weather, never for what is read off right now (the time, the RAM). An id or value
@@ -1850,7 +1954,11 @@ questions the dreams left. Nothing here is shown unasked.
   terminal chat already in it. A pending question (**REM-15**) is opened by code, with no model call: "💭 I've been
   thinking: THOUGHT TEXT My guess: EXPECTED", from its `thought`, `text` and `expected`. The terminal's prompt is
   `💬 interact ›` while in it; on a channel with buttons (Telegram) the question gets "⏭ Skip" (`/skip`) and
-  "🚪 Leave" (`/leave`).
+  "🚪 Leave" (`/leave`). A turn (the first question, or what follows an answer or `/skip`) is worked out apart from
+  the chat, which keeps taking messages meanwhile: `/leave` or a command is answered at once, a plain message is told
+  "💭 Still thinking, one moment." and not taken as an answer, and a turn finished after the chat left the interview
+  is dropped unsaid. A turn whose model call fails says "⚠️ **The model did not answer:** FIRST WORDS" (of the
+  error) and leaves the interview.
 - **INT-2** With no question pending, on entering or once the current one is settled (**INT-3**) with no next, one
   reflection round (**REF-1**) is made, and the first question it kept is opened (**INT-1**) after the turn's `say`
   when there is one. A round that keeps no question says "That's all I had on my mind for now." (after the `say`)

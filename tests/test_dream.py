@@ -80,6 +80,28 @@ def test_consolidate_adds_a_memory_citing_the_batch_and_dreams_it(home_store, mo
 
 
 @pytest.mark.spec("DRM-3")
+def test_consolidate_gists_an_episode_answered_in_words_as_what_tinker_said():
+    assert (
+        "An episode where Tinker ran no command is gisted as what Tinker said (advice, an answer), "
+        "never as an action it took, even when the reply names a command"
+    ) in Prompts.DREAM_CONSOLIDATE_SYSTEM
+
+
+@pytest.mark.spec("DRM-3")
+def test_consolidate_gists_a_routed_episode_as_the_command_chosen():
+    assert (
+        "An episode with routed lines is gisted as the command Tinker chose, never as its result"
+    ) in Prompts.DREAM_CONSOLIDATE_SYSTEM
+
+
+@pytest.mark.spec("DRM-3")
+def test_a_routed_episode_is_not_a_question_answered_in_words():
+    words = {"message": "how tall is everest", "reply": "8.8 km", "status": "answered"}
+    routed = {"message": "list my files", "reply": "/ls", "routed": ["/ls"], "status": "answered"}
+    assert dream_module.answered_in_words([words, routed]) == [words]
+
+
+@pytest.mark.spec("DRM-3")
 def test_consolidate_names_who_said_each_part_of_an_episode(home_store, monkeypatch):
     chat = Scratchpad.write(
         {"chat": "console", "message": "who are you?", "reply": "I'm Tinker.", "status": "answered"}, EARLIER

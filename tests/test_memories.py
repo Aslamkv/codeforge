@@ -3,7 +3,9 @@ import datetime
 import pytest
 from conftest import ask
 
+from tinkerkit.chat.shell import Checked
 from tinkerkit.memory.memories import (
+    STARTER_TOOLS,
     Memories,
     Questions,
     Scratchpad,
@@ -825,15 +827,47 @@ def test_recall_matches_what_an_episode_says_not_its_bookkeeping(home_store):
 
 
 @pytest.mark.spec("REM-4")
-def test_recall_of_some_kinds_keeps_episodes_and_counts_only_those_memories(home_store):
+def test_recall_of_some_kinds_leaves_out_episodes_and_counts_only_those_memories(home_store):
     memories().add("tool", "Rust via cargo", "cargo builds rust.", ["e1"], NOW)
     memories().add("fact", "Likes Rust", "The person writes Rust daily.", ["e1"], NOW)
     Scratchpad.write(chat_episode(message="build a rust game"), NOW)
 
     found = memories().recall("rust", NOW, ("tool",))
 
-    assert sorted(item["id"] for item in found) == ["e1", "m1"]
+    assert [item["id"] for item in found] == ["m1"]
     assert home_store.get("memories", "m2")["recalled"] == 0
+
+
+def starter_tools():
+    return [memory for memory in memories().living() if memory["sources"] == ["starter"]]
+
+
+@pytest.mark.spec("INS-9")
+def test_a_start_adds_every_starter_tool_once(home_store):
+    memories().add_starter_tools()
+    memories().add_starter_tools()
+
+    kept = starter_tools()
+    assert [(memory["kind"], memory["gist"], memory["text"]) for memory in kept] == [
+        ("tool", gist, line) for gist, line in STARTER_TOOLS
+    ]
+
+
+@pytest.mark.spec("INS-9")
+def test_a_starter_tool_already_kept_by_its_line_is_not_added_again(home_store):
+    gist, line = STARTER_TOOLS[0]
+    memories().add("tool", "my own words", line, ["e1"], NOW)
+
+    memories().add_starter_tools()
+
+    assert [memory["text"] for memory in memories().living()].count(line) == 1
+    assert len(starter_tools()) == len(STARTER_TOOLS) - 1
+
+
+@pytest.mark.spec("INS-9")
+def test_every_starter_tool_line_is_read_only(home_store):
+    assert STARTER_TOOLS
+    assert all(Checked.read_only(line) for _, line in STARTER_TOOLS)
 
 
 @pytest.mark.spec("REM-4")

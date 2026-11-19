@@ -49,7 +49,10 @@ def test_the_kind_of_a_command_and_of_its_actions_comes_from_the_table():
         "resume",
         "skill",
     ]
-    assert [command.name for command in COMMANDS if command.kind == "pauses"] == ["chat", "command"]
+    assert [command.name for command in COMMANDS if command.kind == "pauses"] == [
+        "chat",
+        "instruct",
+    ]
 
 
 @pytest.mark.spec("CMD-1")
@@ -70,6 +73,8 @@ def test_the_kind_of_a_command_and_of_its_actions_comes_from_the_table():
         (["help"], "glance"),
         (["history", "2"], "glance"),
         (["stop"], "own"),
+        (["pause"], "own"),
+        (["undo"], "own"),
         (["channel", "add"], "terminal"),
         (["channel", "remove"], "terminal"),
         (["channel", "start"], "terminal"),
@@ -193,7 +198,15 @@ def matched_names(menu):
 def test_slash_matches_name_starts_first_then_name_holds_in_table_order():
     chat = [command.name for command in COMMANDS if command.chat]
     assert names(slash_matches("/")) == chat
-    assert names(slash_matches("/st")) == ["status", "stop", "restart", "system", "history"]
+    assert names(slash_matches("/st")) == [
+        "status",
+        "stop",
+        "restart",
+        "system",
+        "instruct",
+        "instructions",
+        "history",
+    ]
     assert names(slash_matches("/mod")) == ["model"]
     assert names(slash_matches("/xyz")) == []
 
@@ -307,7 +320,7 @@ def test_esc_closes_the_menu_until_typing_narrows_it_again():
     menu.follow("/r")
     assert not menu.open
     menu.follow("/ru")
-    assert menu.open and matched_names(menu) == ["runs", "run"]
+    assert menu.open and matched_names(menu) == ["runs", "run", "instruct", "instructions"]
 
 
 @pytest.mark.spec("MSG-10")
@@ -335,3 +348,15 @@ def test_the_menu_is_closed_without_a_match_and_leaves_other_keys():
     menu = menu_on("/r")
     assert menu.open and menu.press("left") is None and menu.press(Text("u")) is None
     assert menu.press("backspace") is None
+
+
+def test_confirm_help_names_an_instructions_line():
+    confirm = BY_NAME["confirm"]
+    assert "an instruction's line" in confirm.what and "an instruction's command line" in confirm.about
+
+
+def test_instruct_says_it_does_something_on_this_computer():
+    assert (
+        BY_NAME["instruct"].what
+        == "do something on this computer with shell commands, each run once you confirm"
+    )
