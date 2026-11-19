@@ -1877,7 +1877,7 @@ def renewing_desk(monkeypatch, lines):
     channel, console, done = Recorder("bot"), ConsoleChannel(), []
     monkeypatch.setattr(channel, "clear", lambda: done.append("clear bot") or 0)
     monkeypatch.setattr(console, "clear", lambda: done.append("clear console") or 0)
-    monkeypatch.setattr(console, "wipe", lambda: done.append("wipe"))
+    monkeypatch.setattr(console, "wipe", lambda shown: done.extend(["wipe", list(shown)]))
     monkeypatch.setattr(console, "banner", lambda shown: done.append(list(shown)))
     listening = Desk([console, channel], Path.cwd())
     monkeypatch.setattr(listening, "banner_lines", lambda: list(lines))
@@ -1908,14 +1908,26 @@ def test_clear_in_a_chat_clears_that_chat_alone(desk, monkeypatch):
 
 
 @pytest.mark.spec("CNV-12")
-def test_clear_in_the_terminal_wipes_it_down_to_the_banner_alone(desk, monkeypatch):
+def test_clear_in_the_terminal_wipes_it_down_to_the_banner_and_the_status_with_no_note(desk, monkeypatch):
     lines = ["🔧 Tinker", "model qwen3", "help lists commands"]
     listening, _, done = renewing_desk(monkeypatch, lines)
-    console = listening.consoles[0]
-    monkeypatch.setattr(console, "send", lambda chat, text: 1)
-    monkeypatch.setattr(console, "glance", lambda chat, asked, sent, keep: None)
+    console, shown = listening.consoles[0], []
+    monkeypatch.setattr(console, "send", lambda chat, text: done.append(text) or 1)
+    monkeypatch.setattr(console, "show", lambda chat, asked, text, done=False: shown.append(text))
     listening.answer(Message(ConsoleChannel.CHAT, "/clear"), console)
     assert done[1:] == ["clear console", "wipe", lines]
+    assert shown == ["🟢 **Tinker** · idle: send a task"]
+
+
+@pytest.mark.spec("CNV-12")
+def test_clear_in_the_terminal_leaves_a_followed_job_to_its_live_line(desk, monkeypatch):
+    listening, _, _ = renewing_desk(monkeypatch, ["🔧 Tinker"])
+    console, shown = listening.consoles[0], []
+    monkeypatch.setattr(console, "show", lambda chat, asked, text, done=False: shown.append(text))
+    monkeypatch.setattr(listening, "terminal_follows_job", lambda: True)
+    monkeypatch.setattr(listening, "keep_job_at_bottom", lambda: shown.append("job at bottom"))
+    listening.answer(Message(ConsoleChannel.CHAT, "/clear"), console)
+    assert shown == ["job at bottom"]
 
 
 @pytest.mark.spec("CNV-6")

@@ -1267,13 +1267,24 @@ def test_console_waits_without_taking_a_jobs_live_line(monkeypatch, clock):
 
 
 @pytest.mark.spec("CNV-6")
-def test_console_wipes_the_screen_and_scrollback_only_in_a_colour_terminal(monkeypatch):
-    terminal = colour_terminal(monkeypatch)
-    ConsoleChannel().wipe()
-    assert terminal.getvalue() == "\033[H\033[2J\033[3J"
+def test_console_wipes_the_screen_and_scrollback_down_to_the_banner_only_in_a_colour_terminal(monkeypatch):
+    colour_terminal(monkeypatch)
+    banner = drawn_after(lambda: ConsoleChannel().banner(["🔧 Tinker"]))
+    assert drawn_after(lambda: ConsoleChannel().wipe(["🔧 Tinker"])) == "\033[H\033[2J\033[3J" + banner
     monkeypatch.setattr(sys.stdin, "isatty", lambda: False)
-    ConsoleChannel().wipe()
-    assert terminal.getvalue() == "\033[H\033[2J\033[3J"
+    assert drawn_after(lambda: ConsoleChannel().wipe(["🔧 Tinker"])) == ""
+
+
+@pytest.mark.spec("CNV-12")
+def test_console_wipe_keeps_the_live_line_the_rule_and_the_prompt_below_the_banner(monkeypatch, clock):
+    console = live_console(monkeypatch)
+    banner = drawn_after(lambda: console.banner(["🔧 Tinker"]))
+    console.screen.show_live("Learning", 100.0)
+    console.screen.typing_with((PromptDrawer("› "), lambda: "› hi"))
+    wiped = drawn_after(lambda: console.wipe(["🔧 Tinker"]))
+    below = wiped.split("\033[H\033[2J\033[3J" + banner, 1)[1]
+    assert "Learning" in below and below.index("Learning") < below.index("─") < below.index("\n› hi")
+    assert below.endswith("\n› hi")
 
 
 @pytest.mark.spec("CNV-23")

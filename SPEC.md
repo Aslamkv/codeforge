@@ -1189,8 +1189,9 @@ The terminal and the chats are one conversation: the same commands, the same ans
   output is turned into a short answer to what was asked, written in the channel's style (**CNV-18**). `history [PAGE | #N]` lists the things shown by page
   ([State](#state)), with what was asked for each, or shows thing N again. `clear chat` (or `clear` alone) clears only where
   it was sent: from a chat it takes every message out of that chat but the status, leaving the other chats and the
-  terminal as they are; from the terminal it wipes the terminal down to the banner, leaving the chats as they are. It
-  is said in a note that goes in `DONE_NOTE_KEPT_SECONDS`. `clear history` is `tinker clear history`
+  terminal as they are, and says so in a note that goes in `DONE_NOTE_KEPT_SECONDS`; from the terminal it wipes the
+  terminal down to the banner and the status (or the running job's live line), with the rule and prompt kept below,
+  leaving the chats as they are and saying nothing more. `clear history` is `tinker clear history`
   (**SET-9**): once confirmed, it forgets the history, clears the chat as `clear chat` does, and leaves nothing in the
   history, not even what it said.
 - **CNV-13** `Desk.follow` follows a task by its tracker: its run ID, its folder (the title is named after it),

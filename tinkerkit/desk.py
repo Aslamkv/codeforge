@@ -593,9 +593,12 @@ class Desk:
         self.banner_on_consoles()
 
     def banner_on_consoles(self):
-        self.shown_states = {chat: chat.state for chat in self.chats()}
+        self.note_shown_states()
         for console in self.consoles:
             console.banner(self.shown_banner)
+
+    def note_shown_states(self):
+        self.shown_states = {chat: chat.state for chat in self.chats()}
 
     def say_state_changes(self):
         for chat in self.chats():
@@ -1480,17 +1483,23 @@ class Desk:
         return taken
 
     def wipe_consoles(self):
+        self.note_shown_states()
         for console in self.consoles:
-            console.wipe()
-        self.banner_on_consoles()
+            console.wipe(self.shown_banner)
 
     def clear_chat(self, channel, chat, cleared, after=""):
         taken = channel.clear()
         if channel in self.consoles:
-            self.wipe_consoles()
+            return self.wipe_console_to_status(channel)
         sent = channel.send(chat, f"🧹 **{cleared}:** {taken} messages taken out{after}")
         channel.glance(chat, None, [sent], DONE_NOTE_KEPT_SECONDS)
         return None
+
+    def wipe_console_to_status(self, console):
+        self.wipe_consoles()
+        if not self.terminal_follows_job():
+            console.show(ConsoleChannel.CHAT, None, self.status(), done=True)
+        self.keep_job_at_bottom()
 
     def run_app(self, channel, chat, said):
         name, args, stdin = app_request(said[0] if said else "")

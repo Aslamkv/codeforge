@@ -399,17 +399,19 @@ class ConsoleChannel(Channel):
             self.screen.sent(f"{self.prompt()}{line}", shown=not quiet)
 
     def banner(self, lines):
-        if not typed_here():
-            return
+        if typed_here():
+            self.screen.draw(self.framed(lines))
+
+    def wipe(self, lines):
+        if typed_here():
+            self.screen.wiped(WIPE_SCREEN_AND_SCROLLBACK + self.framed(lines))
+
+    def framed(self, lines):
         width = min(terminal_columns(), BANNER_MAX_COLUMNS)
         edge = "─" * (width - 2)
         rows = [self.banner_row(line, "dim" if row else "bold", width - 4) for row, line in enumerate(lines)]
         framed = [styled(f"╭{edge}╮", "accent"), *rows, styled(f"╰{edge}╯", "accent")]
-        self.screen.draw("\n".join(framed) + "\n")
-
-    def wipe(self):
-        if typed_here():
-            self.screen.draw(WIPE_SCREEN_AND_SCROLLBACK)
+        return "\n".join(framed) + "\n"
 
     def note(self, text):
         self.screen.print(styled(text, "dim"))
@@ -609,6 +611,13 @@ class ConsoleScreen:
     def draw(self, text):
         with self.printing:
             write_out(text)
+
+    def wiped(self, top):
+        with self.printing:
+            if self.ruled():
+                self.out(lambda: top + self.block_and_rule() + "\n")
+            else:
+                write_out(top)
 
     def typing_with(self, typing):
         self.typing = typing
