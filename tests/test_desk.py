@@ -1495,6 +1495,9 @@ def test_a_glance_goes_soon_and_history_shows_things_again(desk, monkeypatch):
         channel.texts()[-1].startswith("🧹 **Chat cleared:** 3 messages taken out")
         and glances[-1][3] == DONE_NOTE_KEPT_SECONDS
     )
+    desk.hear(channel, Message("1", "/clear"))
+    assert channel.texts()[-1].startswith("🧹 **Chat cleared:** 3 messages taken out")
+    assert desk.questions.by_chat == {}
     monkeypatch.setattr(desk, "tinker", lambda words: Home.clear(["history"], yes=True) or "Cleared history.")
     desk.answer(Message("1", "/clear history"), channel)
     shown = len(channel.texts())

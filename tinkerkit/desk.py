@@ -120,7 +120,9 @@ USAGE = frozendict(
 COMMANDS_ASKING_FOR_WORDS = tuple(
     command.name
     for command in COMMANDS
-    if command.chat and any(argument.nargs in ("+", None) for argument in command.arguments)
+    if command.chat
+    and command.name != "clear"
+    and any(argument.nargs in ("+", None) for argument in command.arguments)
 ) + ("command",)
 CHAT_APP_START = "/start"
 CHAT_FRESH = "/fresh"
@@ -1075,7 +1077,7 @@ class Desk:
         ).start()
 
     def clear(self, channel, chat, words):
-        if words[1:] == ["chat"]:
+        if words[1:] in ([], ["chat"]):
             return self.clear_chat(channel, chat, "Chat cleared", " · `/history` shows any of them again")
         return self.by_table(channel, chat, words)
 
