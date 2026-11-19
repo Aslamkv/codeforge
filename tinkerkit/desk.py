@@ -642,9 +642,6 @@ class Desk:
     def renew_banner(self):
         self.shown_banner = self.banner_lines()
         self.clear_all_chats()
-        for console in self.consoles:
-            console.wipe()
-        self.banner_on_consoles()
         with self.post_lock:
             for channel in self.chats_started:
                 self.post_banner(channel, self.shown_banner)
@@ -1478,7 +1475,11 @@ class Desk:
         )
 
     def clear_all_chats(self):
-        return sum(each.clear() for each in self.channels)
+        taken = sum(each.clear() for each in self.channels)
+        for console in self.consoles:
+            console.wipe()
+        self.banner_on_consoles()
+        return taken
 
     def clear_chat(self, channel, chat, cleared, after=""):
         taken = self.clear_all_chats()

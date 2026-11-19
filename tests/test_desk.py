@@ -1899,6 +1899,14 @@ def test_a_message_that_changes_the_banner_clears_the_chats_and_shows_the_banner
     assert banner in sent and sent.index(banner) == len(sent) - 2
 
 
+@pytest.mark.spec("CNV-12")
+def test_clear_wipes_the_terminal_down_to_the_banner(desk, monkeypatch):
+    lines = ["🔧 Tinker", "model qwen3", "help lists commands"]
+    listening, channel, done = renewing_desk(monkeypatch, lines)
+    listening.hear(channel, Message("1", "/clear"))
+    assert set(done[1:3]) == {"clear bot", "clear console"} and done[3:] == ["wipe", lines]
+
+
 @pytest.mark.spec("CNV-6")
 def test_a_message_that_leaves_the_banner_alone_clears_nothing(desk, monkeypatch):
     lines = ["🔧 Tinker", "model qwen3", "help lists commands"]
