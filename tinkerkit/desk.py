@@ -1476,13 +1476,18 @@ class Desk:
 
     def clear_all_chats(self):
         taken = sum(each.clear() for each in self.channels)
+        self.wipe_consoles()
+        return taken
+
+    def wipe_consoles(self):
         for console in self.consoles:
             console.wipe()
         self.banner_on_consoles()
-        return taken
 
     def clear_chat(self, channel, chat, cleared, after=""):
-        taken = self.clear_all_chats()
+        taken = channel.clear()
+        if channel in self.consoles:
+            self.wipe_consoles()
         sent = channel.send(chat, f"🧹 **{cleared}:** {taken} messages taken out{after}")
         channel.glance(chat, None, [sent], DONE_NOTE_KEPT_SECONDS)
         return None

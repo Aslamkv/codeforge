@@ -340,7 +340,7 @@ everything else after a day. Nothing is lost: Tinker keeps a history of what it 
 /history         # what the chat showed, newest first, with what you asked
 /history 2       # the next page
 /history #12     # show #12 again
-/clear           # empty the chat now (the history stays); /clear chat too
+/clear           # empty this chat, or the terminal, now (the history stays); /clear chat too
 /clear history   # forget the history too (asks first)
 ```
 

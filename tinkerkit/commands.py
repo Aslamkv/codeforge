@@ -611,8 +611,8 @@ COMMANDS = [
         "history (what the chats showed; in a chat its messages go too), exercise (the exercises), read [#N...] "
         "(readings: their text and what was learned from them; every one with no #N), jobs [#N...] (archived, not "
         "deleted: jobs archived lists them, and they cannot be resumed; every stopped and finished one with no "
-        "#N). In a conversation, clear (or clear chat) takes every "
-        "message out of the chats but Tinker's status, at once: history keeps what they showed.",
+        "#N). In a conversation, clear (or clear chat) clears only "
+        "where it was sent: a chat loses every message but Tinker's status, the terminal is wiped to the banner, at once: history keeps what they showed.",
         kind="glance",
         chat=True,
         words=True,
@@ -644,7 +644,7 @@ COMMANDS = [
                 "archive jobs: jobs archived lists them (stopped, finished: all, with no #N)",
             ),
             ("clear history", "what the chats showed, and what you asked (the chat's messages go too)"),
-            ("clear [chat]", "in a chat: take its messages out now; history keeps them"),
+            ("clear [chat]", "in a chat or the terminal: clear just that one now; history keeps it"),
         ],
     ),
     Command(
