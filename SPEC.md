@@ -682,7 +682,8 @@ What is said in the chats, kept so that a chat is only a view of it.
   context, a longest reply, a longest fix, a think setting, chars per token, and its read and write speeds in
   tokens a second, and what its quality probe solved (**MOD-25**). Each calibration also appends those settings,
   with the model and when it ran, to the home's `calibrations` log (`Store.append`); `models` keeps only the
-  latest. Its messages follow **MOD-26**.
+  latest. Its messages follow **MOD-26**. A resumed calibration reuses the measurement its job journal kept, so
+  the quality tasks already asked are answered from the journal (**JOB-3**).
 - **MOD-13** A calibration probe that fails is recorded as crashed, and the runner gets time to free its
   memory before the next one. A GGUF model whose probe crashes is read again in pieces (`num_batch` 256), and
   keeps that option. When Ollama itself stops answering, calibration ends with `SystemExit`.

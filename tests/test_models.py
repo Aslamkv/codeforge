@@ -7,6 +7,7 @@ import pytest
 from conftest import LOADING_PHASE, MEASURED, MODEL
 
 import tinkerkit.model.models as model_module
+from tinkerkit.jobs import Jobs
 from tinkerkit.messages import DIMMED, HEADING, say
 from tinkerkit.model import quality
 from tinkerkit.model.models import (
@@ -33,6 +34,8 @@ from tinkerkit.settings import (
     Config,
     Home,
 )
+
+JOURNALED_CHAT = Ollama.__dict__["chat"]
 
 
 class Body(io.BytesIO):
@@ -902,6 +905,39 @@ def test_calibrate_writes_the_measured_settings(fake_ollama, monkeypatch, no_sle
         "   💭 Thinks before it answers (think: high)\n"
     ) in out
     assert all(len(line) <= 80 for line in out.splitlines() if "Testing" not in line)
+
+
+@pytest.mark.spec("MOD-12", "JOB-3")
+def test_a_resumed_calibration_keeps_its_measurement_and_asks_only_the_tasks_left(
+    fake_ollama, monkeypatch, no_sleep, home_store
+):
+    monkeypatch.setattr(Ollama, "chat", JOURNALED_CHAT)
+    monkeypatch.setattr(Ollama, "streamed", staticmethod(fake_ollama.chat))
+    facts = {"context_length": 40960, "capabilities": ["completion"], "format": "gguf", "size": 5e9}
+    monkeypatch.setattr(Ollama, "model_facts", staticmethod(lambda name: facts))
+    monkeypatch.setattr(Calibrator, "gpu_memory", classmethod(lambda cls: 20e9))
+    reads = []
+
+    def read_raw(name, prompt, options, keep_alive=0, timeout=0):
+        reads.append(options["num_ctx"])
+        return {"prompt_eval_count": len(prompt), "prompt_eval_duration": 2e9}
+
+    monkeypatch.setattr(Ollama, "read_raw", staticmethod(read_raw))
+    answers = {task["prompt"]: task["answer"] for task in quality.tasks()}
+    solved = lambda messages: {"content": answers[messages[0]["content"]], "total_duration": 3e9}
+    fake_ollama.reply({"content": "OK", "prompt_eval_count": 400, "eval_count": 2, "eval_duration": 1e8})
+    fake_ollama.reply(solved).reply(KeyboardInterrupt())
+    with pytest.raises(KeyboardInterrupt), Jobs.run_here(["model", "calibrate", "m"]):
+        Calibrator("m").run()
+    first = fake_ollama.calls[-1]
+    monkeypatch.setattr(Calibrator, "gpu_memory", classmethod(lambda cls: 8e9))
+    reads.clear()
+    fake_ollama.calls.clear()
+    fake_ollama.reply(solved).reply("not the answer", times=6)
+    with Jobs.run_here(Jobs.arguments(["resume", "#1"])):
+        settings = Calibrator("m").run()
+    assert reads == [] and settings["num_ctx"] == 40960 and settings["solved"] == 2
+    assert len(fake_ollama.calls) == 7 and fake_ollama.calls[0]["options"] == first["options"]
 
 
 @pytest.mark.spec("MOD-26")

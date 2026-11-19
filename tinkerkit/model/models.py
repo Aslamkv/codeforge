@@ -872,19 +872,22 @@ class Calibrator:
 
     def run(self):
         say.title(f"Testing {self.name} on this machine (once per model, about a minute)", "📏")
-        facts = Ollama.model_facts(self.name)
         ThinkLevels.read(self.name)
+        settings = journaled({"calibrate": self.name}, self.measure)
+        settings.update(self.quality(settings["think"], settings["num_ctx"], settings["write_tokens_per_s"]))
+        Ollama.unload(self.name)
+        Models.keep(self.name, settings)
+        say.done(self.summary(settings))
+        return settings
+
+    def measure(self):
+        facts = Ollama.model_facts(self.name)
         self.check_fit(facts)
         target = facts["context_length"] or UNKNOWN_CONTEXT_TOKENS
         think = self.first_chat(facts, target)
         context, crash = self.capacity(target, facts)
         budget, max_reply = self.shared(context)
-        settings = self.settings(facts, think, budget, context, crash, max_reply)
-        settings.update(self.quality(think, settings["num_ctx"], settings["write_tokens_per_s"]))
-        Ollama.unload(self.name)
-        Models.keep(self.name, settings)
-        say.done(self.summary(settings))
-        return settings
+        return self.settings(facts, think, budget, context, crash, max_reply)
 
     def retest(self):
         say.title(f"Testing {self.name} again on the current test tasks", "📏")
