@@ -294,13 +294,20 @@ class InsideJob(NamedTuple):
         return md(t"⚙️ **jobs #{self.number}**\n{self.ended_view():block}\n{ending(self.number)}")
 
     def ended_view(self):
-        header, *lines = job_view(self.number)
-        if JOBS.get(self.number)["state"] in ("running", "queued"):
+        header, *lines = self.lines()
+        if self.still_listed_as_running():
             header = f"#{self.number} ended {self.title}"
         return "\n".join([header, *lines])
 
+    def still_listed_as_running(self):
+        job = JOBS.get(self.number)
+        return job is not None and job["state"] in ("running", "queued")
+
     def view(self):
-        return "\n".join(job_view(self.number))
+        return "\n".join(self.lines())
+
+    def lines(self):
+        return job_view(self.number) or [f"#{self.number} gone {self.title}"]
 
     def left_line(self):
         return md(t"⚙️ **Left #{self.number} {self.title}**")

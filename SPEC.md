@@ -1276,8 +1276,8 @@ The terminal and the chats are one conversation: the same commands, the same ans
   job: entering one leaves the other, and `/leave` leaves any. `/jobs #N` enters job #N while it is in the queue:
   one message shows its view (**JOB-6**) and is edited every `PROGRESS_EDIT_SECONDS` seconds while what it printed
   grows, so the job runs in front of the person; a plain message and a `/command` are answered as outside. When
-  the job leaves the queue its message shows its last lines and how it ended, and the chat leaves the job. A job
-  not in the queue is not entered: its view is shown once. The terminal's prompt is `⚙️ #N Title ›` while
+  the job leaves the queue its message shows its last lines and how it ended, and the chat leaves the job; a job
+  whose record is gone meanwhile shows `#N gone Title`. A job not in the queue is not entered: its view is shown once. The terminal's prompt is `⚙️ #N Title ›` while
   inside; on a channel with buttons the job's message gets a "⚙️ Leave #N" button whose tap sends `/leave`. A chat is inside a reading once it keeps one (`read FILE|URL`, a file dropped or sent, **CNV-26**,
   **CHN-9**) or the person sends `read #N`; a reading kept with no chapters is not entered. Entering says so in
   one line with how to leave. Inside, a plain message is answered in one model call from that reading's passages

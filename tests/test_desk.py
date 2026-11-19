@@ -2741,6 +2741,18 @@ def test_a_followed_job_leaving_the_queue_still_running_reads_ended(in_job, home
 
 
 @pytest.mark.spec("CNV-25")
+def test_a_followed_job_whose_record_is_gone_says_so(in_job, home_store):
+    desk, channel, _ = in_job
+    follower = following(desk, channel)
+    jobs.JOBS.delete(4)
+    assert follower.step()
+    assert "#4 gone learn rust" in channel.texts()[-1]
+    dequeued(4)
+    assert not follower.step()
+    assert "#4 gone learn rust" in channel.texts()[-1] and desk.inside == {}
+
+
+@pytest.mark.spec("CNV-25")
 def test_a_followed_job_stops_once_the_chat_left_it(in_job):
     desk, channel, _ = in_job
     follower = following(desk, channel)
