@@ -590,12 +590,19 @@ tinker memory                # the memories, newest first, and when the last dre
 tinker memory show m3        # one memory with the episodes it came from, or one episode
 tinker memory forget m3      # delete a memory or an episode; for a trait (t2), retire it
 tinker memory traits         # who Tinker thinks you are and should be, and the traits still in doubt
+tinker memory routes         # which messages Tinker has learned mean which command, confirmed first
+tinker memory forget r4      # stop reading messages that way (retire route r4)
 tinker dream                 # the last dream, what it changed, and what waits
 tinker dream run             # dream now
 tinker dream graph           # watch the episodes and memories change, live in the browser
 ```
 
 In a chat, `memory graph` and `dream graph` send the graph as a page to open on your phone.
+
+Tinker learns how you talk to it. When it isn't sure what a message means, it asks in plain words ("I think you
+want me to … Shall I?", with ✅ Yes and ❌ No buttons in Telegram). Each yes teaches it that kind of message, so
+next time it runs the command at once with no model call. A no, or a correction right after ("no, I meant …" or
+the /command you wanted), makes it unlearn that reading.
 
 `interact` (or `tinker interact` for a terminal chat already in it) opens a dialogue about the questions the
 dreams left, one at a time: Tinker says what it has been thinking, the question and its guess at your answer.

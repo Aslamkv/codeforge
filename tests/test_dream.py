@@ -13,6 +13,7 @@ from tinkerkit.build.project import TrackedWork
 from tinkerkit.jobs import Jobs, Queue
 from tinkerkit.memory import dream as dream_module
 from tinkerkit.memory import memories as memory_views
+from tinkerkit.memory import routes as route_views
 from tinkerkit.memory.dream import Dream, LiveGraph, MemoryGraph, Mind, asked, show_dream, show_memory_graph
 from tinkerkit.memory.memories import Memories, Questions, Scratchpad, Traits
 from tinkerkit.model.models import Models, OllamaError
@@ -1197,11 +1198,18 @@ def tracked_work(monkeypatch):
     return seen
 
 
-@pytest.mark.spec("TNK-1", "REM-7", "REM-8", "REM-9", "REM-10", "SET-8")
+@pytest.mark.spec("TNK-1", "REM-7", "REM-8", "REM-9", "REM-10", "SET-8", "RTE-8")
 def test_mind_handles_the_memory_views_and_gives_forget_the_persons_yes(home_store, monkeypatch):
     seen = []
-    for view in ("show_memories", "show_remembered", "forget", "show_traits"):
-        monkeypatch.setattr(memory_views, view, lambda *given, view=view: seen.append((view, *given)))
+    for views, view in (
+        (memory_views, "show_memories"),
+        (memory_views, "show_remembered"),
+        (memory_views, "forget"),
+        (memory_views, "show_traits"),
+        (route_views, "show_routes"),
+        (route_views, "forget_route"),
+    ):
+        monkeypatch.setattr(views, view, lambda *given, view=view: seen.append((view, *given)))
     monkeypatch.setattr(dream_module, "show_memory_graph", lambda: seen.append(("show_memory_graph",)))
     assert Mind.COMMANDS == ("memory", "dream")
     for yes, words in (
@@ -1211,6 +1219,8 @@ def test_mind_handles_the_memory_views_and_gives_forget_the_persons_yes(home_sto
         (True, ["forget", "a1b2c3"]),
         (False, ["forget", "d4e5f6"]),
         (False, ["traits"]),
+        (False, ["routes"]),
+        (True, ["forget", "r2"]),
         (False, ["graph"]),
     ):
         Mind(yes).handle(["memory", *words], Heard())
@@ -1221,6 +1231,8 @@ def test_mind_handles_the_memory_views_and_gives_forget_the_persons_yes(home_sto
         ("forget", "a1b2c3", True),
         ("forget", "d4e5f6", False),
         ("show_traits",),
+        ("show_routes",),
+        ("forget_route", "r2"),
         ("show_memory_graph",),
     ]
 

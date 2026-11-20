@@ -555,11 +555,11 @@ class Cli:
 
     @staticmethod
     def memory_words(words, parser):
-        if words in ([], ["traits"], ["graph"]) or (len(words) == 1 and Cli.is_page(words[0])):
+        if words in ([], ["traits"], ["routes"], ["graph"]) or (len(words) == 1 and Cli.is_page(words[0])):
             return words
         if len(words) == 2 and words[0] in ("show", "forget"):
             return words
-        parser.error("use tinker memory [PAGE] | show ID | forget ID [--yes] | traits | graph")
+        parser.error("use tinker memory [PAGE] | show ID | forget ID [--yes] | traits | routes | graph")
 
     @staticmethod
     def dream_words(words, parser):

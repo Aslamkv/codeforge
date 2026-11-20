@@ -179,6 +179,7 @@ the last column:
 | `episodes` | what each chat request, command line and build did (**REM-1**) | |
 | `memories` | what the dream kept of the episodes (**REM-3**) | |
 | `traits` | who the person is and who Tinker is for them (**REM-5**) | |
+| `routes` | which message pattern means which command line, as learned from the person (**RTE-1**) | |
 | `questions` | the questions that wait for the person, each with the thought behind it and Tinker's guess at the answer, and those answered or skipped (**REM-15**) | |
 | `dream` | the dream's last state (`state`), with the reflection's last thoughts (**DRM-11**) | |
 | log `dream events` | every change a dream made (**DRM-7**) | |
@@ -1166,7 +1167,9 @@ The terminal and the chats are one conversation: the same commands, the same ans
   `show model recipe` is `/model recipe`, `What's the time now?` and `what time is it now?` are `/system time` and
   `ram usage` is `/system ram` (**SYS-3**), while `clear the chat and the history` stays a chat. The command's name may
   be left out when the words are the rest of just one phrase, of a command that does not delete: `show recipe` is
-  `/model recipe`, while `chat` (`/clear chat` deletes) stays a chat. Such a message is handled as the `/PHRASE` sent,
+  `/model recipe`, while `chat` (`/clear chat` deletes) stays a chat. These phrases are not matched on their own:
+  they are the seed routes (**RTE-3**), and a message is matched through the learned routes (**RTE-4**), so a
+  retired seed no longer matches. Such a message is handled as the `/PHRASE` sent,
   so a command that deletes asks first just the same. A message that answers a waiting question is not matched. The
   command line (`tinker help`) is not a conversation: its commands take no `/`.
 - **CNV-4** `Channel.said` writes `tinker COMMAND` as `/COMMAND` in a conversation, in the terminal as in every
@@ -1308,7 +1311,9 @@ The terminal and the chats are one conversation: the same commands, the same ans
   failed. Each prompt holds only what its message needs. The channel's class picks how replies are written
   (`STYLE`): a Telegram chat is read on a phone (brief, short lines), the console is a terminal; both render
   Markdown. Tinker acts on what the person asks rather than saying what to type, in steps.
-  First a route call (`CHAT_ROUTE_SYSTEM`, think `off`, temperature 0, a short reply) gets only the message and
+  First the learned routes are asked, with no model (**RTE-4**); a match gives the lines and no route or fill call is
+  made. Only on a miss, or when they are unsure, a route call (`CHAT_ROUTE_SYSTEM`, think `off`, temperature 0, a
+  short reply; its examples include the seed routes, `ROUTE_SEEDS`, and some `none` ones) gets only the message and
   the index, never the thread: the commands a chat offers, grouped as in `help`, each with what it is for, from its `what`
   (`/skill — learn a shell command, alias, script or program as a skill, and list or forget the skills`), and the skills, one line
   each (`/skill NAME — purpose`, **SKL-1**), only when there are some. It replies with only the command names,
@@ -1348,9 +1353,10 @@ The terminal and the chats are one conversation: the same commands, the same ans
   keeps only its lines that start with `/` and that `command_of` gives a command (or skill) for that the route
   call named; any other line is dropped; a reply left with no line runs the route call's lines as it gave them
   instead, each with `/` added when it has none. A reply whose every line, with or without backticks, is one that `command_of`
-  gives a command for is not shown, and neither is a glance's line inside a sentence. Each such line runs at
-  once, in turn, with no offer to confirm: a deletion still asks first (**SET-8**) and a build still waits at
-  its plan (**CNV-9**). A glance asked for this way is answered in words (**CNV-12**), with one more model
+  gives a command for is not shown, and neither is a glance's line inside a sentence. A glance's line, a line
+  from a confirmed route and a deletion's line run at once, in turn: a deletion still asks first (**SET-8**) and a
+  build still waits at its plan (**CNV-9**); any other line, from the model or a candidate route, is proposed first
+  (**RTE-6**). A glance asked for this way is answered in words (**CNV-12**), with one more model
   call over its output; any other command asked for in words ends with a short answer saying what was done
   (`✅ jarvis added`). Any other reply is shown.
 - **CNV-19** A chat or a command line is a job at the front (**JOB-1**, **JOB-8**); while it pushes back the
@@ -1766,7 +1772,7 @@ Nothing here calls the model.
 
 - **REM-1** `Scratchpad.write(episode)` keeps one episode in `episodes` for each chat request (`Talk.answering`:
   the message, the commands it ran, their output cut to `EPISODE_FOUND_CHARS`, the /-lines the route named as
-  `routed` (chosen, never counted as run), the reply, and `answered`,
+  `routed` (chosen, never counted as run), the learned route used as `route` (its id, or `""`, **RTE-4**), the reply, and `answered`,
   `remembered` (answered from memory, **REM-12**) or `failed`), each instruction run once it ends (**INS-4**: the request, the line, its output cut the same way, its
   exit code), and each build when it ends (its task and status); a chat answer cut off at length is not kept
   (**CNV-18**). An episode has the next id `eN`, its chat, its time
@@ -1850,6 +1856,52 @@ Nothing here calls the model.
   part "Who the person is and how they want you to be" in each prompt that serves the person: both calls of
   `Talk.reply`, an answer inside a reading (**CNV-25**), `COMMAND_TELL_SYSTEM`, `ASK_SYSTEM` and the build's phases
   (**SES-3**), each for its own text. A dream, learning, the exercise and calibration never get it.
+
+## memory.routes (RTE)
+
+Which message means which command line, learned from what the person says yes and no to. Nothing here calls the
+model.
+
+- **RTE-1** A route in `routes` is `{id, pattern, line, status, source, uses, misses, history, retired}`: id `rN`,
+  `pattern` a masked message (**RTE-2**), `line` a command line with the same slots, `none` (answer in words) or
+  `/instruct` (the message as sent), status `candidate`, `confirmed` or `retired` (with why in `retired`), source
+  `seed`, `said`, `model` or `correction`, `uses` and `misses` counts, `history` its `{event, at, text}`.
+- **RTE-2** `mask(text, state)` lowercases the words and drops punctuation and `SAID_FILLER` (**CNV-3**), then puts a
+  slot for each value it knows: `#N` is `JOB`, `@x` `PROJECT`, a path that exists `PATH`, a URL `URL`, and a known
+  model, skill or channel name `MODEL`, `SKILL` or `CHANNEL`. It gives the masked words and each slot's values in
+  order. A route's line gets the values back in its slots; a slot with no value is a miss: the route does not match.
+- **RTE-3** At start each said phrase (**CNV-3**, with its left-out-name rule) is a seed route, confirmed, source
+  `seed`, pattern the phrase and line `/PHRASE`, added only when no route (living or retired) has that pattern: a
+  retired seed stays retired.
+- **RTE-4** `Routes.match(text, state)` masks the message and looks among the living routes (not retired) for its
+  pattern exactly, else for the most alike in words (alike, **KNW-11**, words only: at least `ROUTE_SAME_WORDS`,
+  0.9; no embedding call, **PRI-8**). Two best routes with different lines are unsure. A match gives the route and
+  its line with the values in; a miss or an unsure match goes to the model (**CNV-18**). A message that answers a
+  waiting question is not matched.
+- **RTE-5** `Routes` changes only by deltas the code applies, each added to the route's history: `add` (a new
+  candidate, or confirmed when the person said it), `use` (uses one higher), `confirm` (a candidate confirmed),
+  `miss` (misses one higher) and `retire` (with why). An add whose pattern a living route has confirms that route
+  when it has the same line, else retires it and adds the new one; an add whose pattern only a retired route with
+  the same line has is dropped, so nothing is asked twice. A line that deletes (**SET-8**) is never added.
+- **RTE-6** A line from the model or a candidate route that is not a glance (**CMD-1**), `none`, `/instruct` or a
+  deletion is proposed before it runs, in plain words and never as command syntax: "I think you mean NAME: WHAT
+  (VALUES). Shall I?", NAME the command's name without its slash and WHAT its `what` (with no `what`, "I think you
+  mean NAME (VALUES). Shall I?"); a Telegram chat gets buttons ✅ Yes (`/confirm`) and ❌ No
+  (`/cancel`). The chat then waits for the answer (`WaitingRoute`). Yes runs the line; no shows `🚫 Not run`; a
+  plain message is an amend: the model routes again with the original message, the proposal and the amend, and its
+  new lines go through this rule again, learned under the original message's pattern; any answer to the amend ends
+  it. A routed `/instruct` uses its own proposal (**INS-2**).
+- **RTE-7** What the person does teaches the routes. A yes, or a quiet yes (a glance or `none` that ran with no
+  correction, an `/instruct` whose first proposal was not cancelled), adds the line as a candidate (source `model`)
+  when no route gave it, and confirms the candidate that gave it. A no retires the candidate that gave it (a model
+  line keeps nothing), and so does an amend. A correction is the chat's next message within
+  `ROUTE_CORRECTION_SECONDS` (120) that is a `/command` or starts with `no` or `I meant`: it retires the route used
+  (why: the correction), and a `/command` correction adds a candidate from the message's pattern to that line
+  (source `correction`). A confirmed route's line runs at once and counts a use. A reply the model failed to give
+  (the route or answer call returned an error) teaches nothing, and `/confirm` or `/cancel` with no proposal
+  waiting is no yes, no no and no correction.
+- **RTE-8** `tinker memory routes` lists the living routes, confirmed first, each as its id, pattern → line, status
+  and uses; it is a glance (**CMD-1**). `tinker memory forget rN` retires that route "forgotten".
 
 ## memory.reflection (REF)
 

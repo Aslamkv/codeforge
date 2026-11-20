@@ -249,6 +249,8 @@ ANSWER_LASTS_DAYS = {"day": 1, "month": 30, "always": None}
 ANSWER_SAME_MEANING = 0.9
 QUESTION_SAME_MEANING = 0.9
 ANSWER_SAME_WORDS = 0.9
+ROUTE_SAME_WORDS = 0.9
+ROUTE_CORRECTION_SECONDS = 120
 ANSWER_COMMON_WORDS = frozenset(
     {"a", "an", "the", "is", "are", "was", "were", "what", "how", "in", "of", "to", "for", "on", "do", "does"}
     | {"i", "me", "my", "you", "it", "and", "or", "please", "tell", "about", "with", "at", "by", "be"}

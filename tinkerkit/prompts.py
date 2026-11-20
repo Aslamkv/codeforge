@@ -31,6 +31,12 @@ from .text import first_line
 StringStates = namedtuple("StringStates", "states in_string")
 FileBlock = namedtuple("FileBlock", "path content")
 LineEdit = namedtuple("LineEdit", "path first last lines")
+ROUTE_SEEDS = (
+    ("how do I learn a skill?", "/help"),
+    ("my downloads folder is a mess", "/instruct"),
+    ("what is a black hole?", "none"),
+    ("how do I fold a fitted sheet?", "none"),
+)
 
 
 class ExampleCopies:

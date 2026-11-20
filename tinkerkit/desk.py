@@ -75,13 +75,16 @@ from .jobs import (
     tinker_process,
 )
 from .memory.memories import Memories, Scratchpad
+from .memory.routes import CANCEL as CHAT_CANCEL
+from .memory.routes import CONFIRM as CHAT_CONFIRM
+from .memory.routes import INSTRUCT, NoRoutes, RouteFeedback, Routes, mask
 from .skills import Skills
 lazy from .chat.ledger import DONE_NOTE_KEPT_SECONDS, Ledger
 lazy from .instructions import Instructions, Run
 lazy from .messages import human_duration, next_page_line, next_page_words, say
 lazy from .messages import styled as styled_choice
 lazy from .model.models import Cut, Models, Ollama, OllamaError, system_turn
-lazy from .prompts import Part, Prompts
+lazy from .prompts import ROUTE_SEEDS, Part, Prompts
 lazy from .ranking import Embeddings, Retriever, traits_part
 lazy from .settings import (
     EPISODE_GIST_CHARS,
@@ -129,10 +132,11 @@ COMMANDS_ASKING_FOR_WORDS = tuple(
 ) + ("instruct",)
 CHAT_APP_START = "/start"
 CHAT_FRESH = "/fresh"
-CHAT_CONFIRM = "/confirm"
 CHAT_LEAVE = "/leave"
 CHAT_SKIP = "/skip"
 RUN_BUTTON = "✅ Run"
+YES_BUTTON = "✅ Yes"
+NO_BUTTON = "❌ No"
 NEXT_PAGE_BUTTON = "Next page ›"
 FRESH_ANSWER_BUTTON = "🔄 Fresh answer"
 LEAVE_READING_BUTTON = "📕 Leave #{number}"
@@ -719,8 +723,20 @@ class Desk:
         self.shelf, self.inside, self.turning = shelf or NoShelf(), {}, {}
         self.interview, self.interviewing = interview or NoInterview(), interviewing
         self.last_task = self.reporter = self.task = None
-        self.lock, self.talk = threading.Lock(), Talk(commands_brief(), pausing_jobs=answering)
         self.questions = Questions()
+        self.routes = Routes(deletes=line_deletes)
+        self.routes.seed(seed_routes())
+        self.feedback = RouteFeedback(self.routes, lambda: route_names(self.channels), quiet_line)
+        self.lock, self.talk = (
+            threading.Lock(),
+            Talk(
+                commands_brief(),
+                pausing_jobs=answering,
+                routes=self.routes,
+                known=lambda: route_names(self.channels),
+                feedback=self.feedback,
+            ),
+        )
         self.waiting_plan = NoWaitingPlan()
         self.messages_by_run = {}
         self.seconds_by_run = {}
@@ -1063,8 +1079,12 @@ class Desk:
         self.left_if_gone(channel, message.chat)
 
     def handled(self, channel, message, asked):
+        if asked is None:
+            self.feedback.heard(message.chat, message.text, datetime.datetime.now())
+        answers_a_question = bool(self.questions.waiting(channel, message.chat))
         said = self.as_said(channel, self.with_words_wanted(channel, message))
-        if self.cancel_left_mode(channel, said):
+        cancelled = said.text.split() == [CHAT_CANCEL] and bool(self.questions.waiting(channel, said.chat))
+        if self.cancel_left_mode(channel, said) or cancelled:
             return
         if message.text.split()[:1] == [CHAT_APP_START]:
             channel.send(message.chat, welcome())
@@ -1097,6 +1117,8 @@ class Desk:
         if self.chose(channel, message, command):
             return
         if not command:
+            if answers_a_question:
+                self.talk.answering_question(message.chat)
             self.talk.answer(
                 channel,
                 message,
@@ -1199,11 +1221,20 @@ class Desk:
         return True
 
     def as_said(self, channel, message):
-        said = said_command(message.text)
-        answers_a_question = said != "/confirm" and self.questions.waiting(channel, message.chat)
+        matched = self.said_match(message.text)
+        said = matched.line if matched else ""
+        answers_a_question = said != CHAT_CONFIRM and self.questions.waiting(channel, message.chat)
         if not said or answers_a_question or self.taken_inside(channel, message):
             return message
+        self.feedback.routed(message.chat, message.text, said, matched.route, datetime.datetime.now())
         return Message(message.chat, said, message.sender, message.id)
+
+    def said_match(self, text):
+        matched = (
+            None if text.startswith("/") else confirmed_match(self.routes, text, route_names(self.channels))
+        )
+        line = matched.line if matched else ""
+        return matched if line.startswith("/") and line.split()[0] != INSTRUCT else None
 
     def with_words_wanted(self, channel, message):
         question = self.questions.waiting(channel, message.chat)
@@ -1215,7 +1246,39 @@ class Desk:
         return Message(message.chat, f"/{wanted} {message.text}", message.sender, message.id)
 
     def replied(self, channel, message, line):
+        if self.feedback.proposes(message.chat):
+            self.propose_routed(channel, message, line)
+            return
+        self.run_routed(channel, message, line)
+
+    def run_routed(self, channel, message, line):
         self.handle(channel, Message(message.chat, line, message.sender), message.text)
+
+    def propose_routed(self, channel, message, line):
+        proposal = routed_proposal(line)
+        shown = channel.send(message.chat, proposal)
+        channel.offer_yes_no(message.chat, shown)
+        self.questions.ask(
+            channel,
+            message.chat,
+            Question(
+                runs=lambda: self.routed_yes(channel, message, line),
+                cancels=lambda: self.routed_no(channel, message.chat, shown, proposal),
+                amends=lambda said: self.routed_amend(channel, message, shown, proposal),
+            ),
+        )
+
+    def routed_amend(self, channel, message, shown, proposal):
+        self.routed_no(channel, message.chat, shown, proposal)
+        self.talk.amend(message.chat, message.text, proposal)
+
+    def routed_yes(self, channel, message, line):
+        self.feedback.answered(message.chat, True, datetime.datetime.now())
+        self.run_routed(channel, message, line)
+
+    def routed_no(self, channel, chat, shown, proposal):
+        self.feedback.answered(chat, False, datetime.datetime.now())
+        channel.show(chat, [shown], f"{proposal}\n🚫 _Not run_", done=True, bottom=False)
 
     def cancel_left_mode(self, channel, said):
         mode_before = self.inside.get(said.chat)
@@ -1224,10 +1287,12 @@ class Desk:
 
     def cancel_unless_confirmed(self, channel, said):
         question = self.questions.waiting(channel, said.chat)
-        if not question or question.naming or said.text.split() == ["/confirm"]:
+        if not question or question.naming or said.text.split() == [CHAT_CONFIRM]:
             return
         answered = self.questions.answered(channel, said.chat)
-        if not self.cancels_quietly(said):
+        if answered.amends and not said.text.startswith("/"):
+            answered.amends(said)
+        elif not self.cancels_quietly(said):
             answered.cancels()
 
     def cancels_quietly(self, said):
@@ -1431,6 +1496,7 @@ class Desk:
         mode = self.entered_instruction(channel, request)
 
         def unrouted():
+            self.feedback.refused(message.chat, datetime.datetime.now())
             channel.send(message.chat, self.left(channel, message.chat))
 
         shell = RoutedInstructionShell(self.talk, self.questions, mode.number, unrouted)
@@ -2096,10 +2162,10 @@ def replied_commands(reply):
     return glance_in_sentence(reply)
 
 
-def answered_episode(message, reply, lines):
+def answered_episode(message, reply, lines, route=""):
     said = reply[0] if reply else ""
     failed = not said or said.startswith("⚠️")
-    episode = {"chat": message.chat, "message": message.text, "reply": said}
+    episode = {"chat": message.chat, "message": message.text, "reply": said, "route": route}
     routed = {"routed": lines} if lines else {}
     return dict(episode, **routed, status=reply_status(said, failed))
 
@@ -2110,6 +2176,26 @@ def reply_status(said, failed):
     return "remembered" if isinstance(said, Remembered) else "answered"
 
 
+def confirmed_match(routes, text, known):
+    matched = routes.match(text, known)
+    return matched if matched and matched.route["status"] == "confirmed" else None
+
+
+def routed_proposal(line):
+    words = line.split()
+    values = f" ({' '.join(words[1:])})" if words[1:] else ""
+    return f"I think you mean {proposed_name(command_of(line))}{values}. Shall I?"
+
+
+def proposed_name(command):
+    what = BY_NAME[command].what if command in BY_NAME else ""
+    return f"{command}: {what}" if what else command
+
+
+def quiet_line(line):
+    return line == "none" or bool(command_of(line)) and kind_of(command_words(line)) == "glance"
+
+
 def glance_in_sentence(reply):
     spans = [span.strip() for span in re.findall(r"`([^`\n]+)`", reply) if span.strip().startswith("/")]
     if len(spans) == 1 and command_of(spans[0]) and kind_of(command_words(spans[0])) == "glance":
@@ -2117,20 +2203,37 @@ def glance_in_sentence(reply):
     return []
 
 
-SAID_FILLER = tuple(
-    "the my please can could would you tinker a an me now just show see view display what is it s usage".split()
-)
-
-
-def said_command(text):
-    if text.startswith("/"):
-        return ""
-    words = tuple(word for word in re.sub(r"[^\w\s]", " ", text.lower()).split() if word not in SAID_FILLER)
+def seed_routes():
     phrases = said_phrases()
-    if words in phrases:
-        return "/" + " ".join(words)
-    named = [phrase for phrase in phrases if words and phrase[1:] == words and not deletes(list(phrase))]
-    return "/" + " ".join(named[0]) if len(named) == 1 else ""
+    return [
+        *((" ".join(phrase), "/" + " ".join(phrase)) for phrase in sorted(phrases)),
+        *left_out_name_seeds(phrases),
+        *((mask(message, {}).pattern, line) for message, line in ROUTE_SEEDS),
+    ]
+
+
+def line_deletes(line):
+    return deletes(line.lstrip("/").split())
+
+
+def route_names(channels):
+    return {
+        "MODEL": list(Home.store().items("models")),
+        "SKILL": [skill.name for skill in Skills.all()],
+        "CHANNEL": [channel.name for channel in channels],
+    }
+
+
+def left_out_name_seeds(phrases):
+    by_rest = {}
+    for phrase in sorted(phrases):
+        if phrase[1:] and phrase[1:] not in phrases:
+            by_rest.setdefault(phrase[1:], []).append(phrase)
+    return [
+        (" ".join(rest), "/" + " ".join(named))
+        for rest, (named, *others) in by_rest.items()
+        if not others and not deletes(list(named))
+    ]
 
 
 def said_phrases():
@@ -2297,10 +2400,25 @@ def thread_part(lines):
     return f"\n\n{Part(Prompts.EARLIER, Part.bullets(lines)).render()}"
 
 
+class NoFeedback:
+    def routed(self, chat, text, line, route, now):
+        pass
+
+
 class Talk:
-    def __init__(self, commands, pausing_jobs=contextlib.nullcontext):
+    def __init__(self, commands, pausing_jobs=contextlib.nullcontext, routes=None, known=dict, feedback=None):
         self.commands, self.turn = commands, threading.Lock()
         self.pausing_jobs = pausing_jobs
+        self.routes, self.known, self.used_routes = routes or NoRoutes(), known, {}
+        self.feedback = feedback or NoFeedback()
+        self.amending, self.amended_texts = {}, {}
+        self.answering_chats = set()
+
+    def amend(self, chat, original, proposal):
+        self.amending[chat] = (original, proposal)
+
+    def answering_question(self, chat):
+        self.answering_chats.add(chat)
 
     def answer(
         self,
@@ -2324,8 +2442,13 @@ class Talk:
         threading.Thread(target=self.write, args=(write_reply, asked, reply, written), daemon=True).start()
         note = self.busy_until(written, running, now, channel, message.chat)
         lines = replied_commands(reply[0]) if on_command and reply else []
+        route = self.used_routes.pop(id(message), None)
+        learned_text = self.amended_texts.pop(id(message), message.text)
         if not (reply and isinstance(reply[0], Cut)):
-            Scratchpad.write(answered_episode(message, reply, lines))
+            Scratchpad.write(answered_episode(message, reply, lines, route["id"] if route else ""))
+            if on_command and len(lines) <= 1 and reply_given(reply):
+                line = lines[0] if lines else "none"
+                self.feedback.routed(message.chat, learned_text, line, route, datetime.datetime.now())
         if lines:
             for shown in note or []:
                 channel.delete(message.chat, shown)
@@ -2371,7 +2494,11 @@ class Talk:
 
     def reply(self, channel, message, state=NO_CHAT_STATE, tokens=CHAT_MAX_REPLY_TOKENS):
         remembered = Models.quick() and remembered_answer(message.text)
-        return remembered or self.asked_reply(channel, message, state, tokens)
+        if remembered:
+            self.amending.pop(message.chat, None)
+            self.answering_chats.discard(message.chat)
+            return remembered
+        return self.asked_reply(channel, message, state, tokens)
 
     def asked_reply(self, channel, message, state=NO_CHAT_STATE, tokens=CHAT_MAX_REPLY_TOKENS):
         return self.modeled_reply(channel, message, state, tokens, self.routed_reply)
@@ -2391,10 +2518,36 @@ class Talk:
         try:
             text = replying(channel, message, asked, memories, state, thread, tokens)
         except OllamaError as exc:
-            return md(t"⚠️ **The model did not answer:** {first_words(exc)}")
+            return Unanswered(md(t"⚠️ **The model did not answer:** {first_words(exc)}"))
         return text or "_(no answer)_"
 
     def routed_reply(self, channel, message, asked, memories, state, thread, tokens):
+        asked, line = self.learned_route(message, asked)
+        if line:
+            return self.learned_reply(channel, message, asked, memories, state, thread, tokens, line)
+        return self.modeled_route_reply(channel, message, asked, memories, state, thread, tokens)
+
+    def learned_route(self, message, asked):
+        if amended := self.amending.pop(message.chat, None):
+            self.amended_texts[id(message)] = amended[0]
+            return amend_turns(*amended) + asked, None
+        if message.chat in self.answering_chats:
+            self.answering_chats.discard(message.chat)
+            return asked, None
+        matched = self.routes.match(message.text, self.known())
+        if not matched:
+            return asked, None
+        self.used_routes[id(message)] = matched.route
+        return asked, matched.line
+
+    def learned_reply(self, channel, message, asked, memories, state, thread, tokens, line):
+        if line == "none":
+            return self.answered(channel, message, asked, memories, state, thread, tokens)
+        if line.split()[0] == INSTRUCT:
+            return instruct_line(message)
+        return line
+
+    def modeled_route_reply(self, channel, message, asked, memories, state, thread, tokens):
         text = self.routed(channel, message, asked)
         names = named_commands(text)
         if not names:
@@ -2617,6 +2770,10 @@ def instruct_line(message):
     return f"/instruct {message.text}"
 
 
+def amend_turns(original, proposal):
+    return [{"role": "user", "content": original}, {"role": "assistant", "content": proposal}]
+
+
 def bare_line(line):
     return line.strip().strip("`").strip()
 
@@ -2657,6 +2814,14 @@ def question_of(item):
 
 class Remembered(str):
     pass
+
+
+class Unanswered(str):
+    pass
+
+
+def reply_given(reply):
+    return bool(reply) and not isinstance(reply[0], Unanswered)
 
 
 def keep_memory(kind, gist, text, sources):

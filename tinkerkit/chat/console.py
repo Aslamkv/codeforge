@@ -184,6 +184,9 @@ class Channel:
     def offer_run(self, chat, shown, label):
         pass
 
+    def offer_yes_no(self, chat, shown):
+        pass
+
     def ask_for(self, chat, question, hint):
         return self.send(chat, question)
 

@@ -25,7 +25,7 @@ from ..settings import (
     Home,
 )
 from ..store import Log
-from . import memories
+from . import memories, routes
 from .memories import (
     DREAM,
     Memories,
@@ -698,10 +698,14 @@ class Mind(Subsystem):
         match words:
             case ["show", item_id]:
                 memories.show_remembered(item_id)
+            case ["forget", route_id] if route_id.startswith("r"):
+                routes.forget_route(route_id)
             case ["forget", item_id]:
                 memories.forget(item_id, self.yes)
             case ["traits"]:
                 memories.show_traits()
+            case ["routes"]:
+                routes.show_routes()
             case ["graph"]:
                 show_memory_graph()
             case [page]:

@@ -62,8 +62,8 @@ def taught_command(words):
     return None
 
 
-def forgets_no_trait(words):
-    return not re.fullmatch(r"t\d+", " ".join(words[1:2]))
+def forgets_for_good(words):
+    return not re.fullmatch(r"[tr]\d+", " ".join(words[1:2]))
 
 
 class Command:
@@ -509,26 +509,33 @@ COMMANDS = [
     Command(
         "memory",
         "Learn",
-        "memory [PAGE] | show ID | forget ID [--yes] | traits",
-        "what Tinker remembers about you, and its traits",
+        "memory [PAGE] | show ID | forget ID [--yes] | traits | routes",
+        "what Tinker remembers about you, its traits and routes",
         "See what Tinker remembers from what you do, a page at a time: memory lists the memories newest first, "
         "each with its ID, kind and gist, then how many episodes wait for a dream and when the last dream was; "
         "memory show ID shows one memory or episode whole; memory forget ID deletes one (asking first) or "
-        "retires a trait; memory traits shows the confirmed traits, the candidates and the waiting questions.",
+        "retires a trait or route; memory traits shows the confirmed traits, the candidates and the waiting questions; "
+        "memory routes lists the living routes, confirmed first.",
         kind="glance",
-        actions=[Action("glance", "forget", forgets_no_trait, deletes=True)],
+        actions=[Action("glance", "forget", forgets_for_good, deletes=True)],
         chat=True,
         words=True,
         arguments=[
-            Argument("words", "*", "[PAGE] | show ID | forget ID | traits", "the page, from 1; or an action")
+            Argument(
+                "words",
+                "*",
+                "[PAGE] | show ID | forget ID | traits | routes",
+                "the page, from 1; or an action",
+            )
         ],
         options=("yes",),
         example="memory show a1b2c3",
         rows=[
             ("memory [PAGE]", "the memories, newest first, and when the last dream was"),
             ("memory show ID", "one memory (with its sources) or episode whole"),
-            ("memory forget ID [--yes]", "delete one memory or episode, or retire a trait"),
+            ("memory forget ID [--yes]", "delete one memory or episode, or retire a trait or route"),
             ("memory traits", "the confirmed traits, the candidates and the waiting questions"),
+            ("memory routes", "the living routes, confirmed first, each with its status and uses"),
         ],
     ),
     Command(

@@ -71,6 +71,7 @@ from tinkerkit.desk import (
     built_project,
     first_lines,
     last_run_state,
+    quiet_line,
     thread_episodes,
     thread_line,
     welcome,
@@ -80,6 +81,7 @@ from tinkerkit.jobs import Queue, Runner, began_at
 from tinkerkit.memory.interview import UNREADABLE, Interview
 from tinkerkit.memory.memories import Questions as KeptQuestions
 from tinkerkit.memory.memories import Scratchpad
+from tinkerkit.memory.routes import SAID_FILLER, RouteFeedback, Routes, mask
 from tinkerkit.messages import DIMMED, HEADING, Messages, Text, next_page_words
 from tinkerkit.messages import say as shared_say
 from tinkerkit.model.models import Cut, Models, QuickModel, ThinkLevels
@@ -118,38 +120,60 @@ def test_command_of(text, command):
     assert command_of(text, Desk.COMMANDS) == command
 
 
+def said_line(desk, text):
+    matched = desk.said_match(text)
+    return matched.line if matched else ""
+
+
 @pytest.mark.spec("CNV-3")
-def test_said_command_gives_a_fixed_phrase_of_a_chat_command_as_slash():
+def test_a_said_fixed_phrase_of_a_chat_command_matches_it_as_slash(desk):
+    desk, _, _ = desk
     for said in ("clear chat", "status", "jobs running", "model recipe all", "exercise status"):
-        assert desk_module.said_command(said) == f"/{said}"
+        assert said_line(desk, said) == f"/{said}"
     for said in ("task", "fix", "ask"):
-        assert desk_module.said_command(said) == ""
-    assert desk_module.said_command("Clear the chat, please!") == "/clear chat"
-    assert desk_module.said_command("clear the chat and the history") == ""
-    assert desk_module.said_command("status of my build") == ""
+        assert said_line(desk, said) == ""
+    assert said_line(desk, "Clear the chat, please!") == "/clear chat"
+    assert said_line(desk, "clear the chat and the history") == ""
+    assert said_line(desk, "status of my build") == ""
 
 
 @pytest.mark.spec("CNV-3")
-def test_said_command_takes_show_words_and_a_left_out_command_name():
-    assert desk_module.said_command("show model recipe") == "/model recipe"
-    assert desk_module.said_command("show recipe") == "/model recipe"
-    assert desk_module.said_command("see the recipe all") == "/model recipe all"
-    assert desk_module.said_command("chat") == ""
-    assert desk_module.said_command("show me the chat") == ""
+def test_a_said_phrase_takes_show_words_and_a_left_out_command_name(desk):
+    desk, _, _ = desk
+    assert said_line(desk, "show model recipe") == "/model recipe"
+    assert said_line(desk, "show recipe") == "/model recipe"
+    assert said_line(desk, "see the recipe all") == "/model recipe all"
+    assert said_line(desk, "chat") == ""
+    assert said_line(desk, "show me the chat") == ""
 
 
 @pytest.mark.spec("CNV-3", "SYS-3")
-def test_said_command_drops_question_words():
-    assert desk_module.said_command("What's the time now?") == "/system time"
-    assert desk_module.said_command("what time is it now?") == "/system time"
-    assert desk_module.said_command("what is my battery") == "/system battery"
-    assert desk_module.said_command("ram usage") == "/system ram"
-    assert desk_module.said_command("disk usage") == "/system disk"
+def test_a_said_phrase_drops_question_words(desk):
+    desk, _, _ = desk
+    assert said_line(desk, "What's the time now?") == "/system time"
+    assert said_line(desk, "what time is it now?") == "/system time"
+    assert said_line(desk, "what is my battery") == "/system battery"
+    assert said_line(desk, "ram usage") == "/system ram"
+    assert said_line(desk, "disk usage") == "/system disk"
 
 
 def test_said_filler_holds_no_word_of_a_phrase():
     words = {word for phrase in desk_module.said_phrases() for word in phrase}
-    assert not words & set(desk_module.SAID_FILLER)
+    assert not words & set(SAID_FILLER)
+
+
+@pytest.mark.spec("RTE-3", "CNV-3")
+def test_seed_routes_are_the_said_phrases_their_left_out_names_and_the_route_seeds():
+    seeds = dict(desk_module.seed_routes())
+
+    assert seeds["model recipe"] == "/model recipe"
+    assert seeds["recipe"] == "/model recipe"
+    assert seeds["system battery"] == "/system battery"
+    assert seeds["clear chat"] == "/clear chat"
+    assert "chat" not in seeds
+    assert seeds["how do i learn skill"] == "/help"
+    assert seeds["black hole"] == "none"
+    assert all(len(seed) == 2 and seed[0] for seed in desk_module.seed_routes())
 
 
 @pytest.mark.spec("CNV-6")
@@ -506,12 +530,26 @@ def chatted(desk, channel, monkeypatch, asked):
 
     monkeypatch.setattr(Models, "quick_reply", staticmethod(quick_reply))
 
-    def chat(reply, shown, *more, ahead=("none", "low: a plain request")):
+    def chat(reply, shown, *more, ahead=("none", "low: a plain request"), confirm=False):
+        unlearned(desk)
         replies.extend([*ahead, reply, *more])
         say(desk, channel, "do it for me")
+        if confirm:
+            confirmed(desk, channel)
         wait_until(lambda: shown("".join(channel.texts()[-1:])))
 
     return chat
+
+
+def unlearned(desk):
+    desk.feedback.last.clear()
+    retired = [{"op": "retire", "id": route["id"], "why": "test"} for route in model_routes()]
+    desk.routes.apply(retired, datetime.datetime.now())
+
+
+def confirmed(desk, channel):
+    wait_until(lambda: channel.log[-1][0] == "yes_no")
+    say(desk, channel, "/confirm")
 
 
 @pytest.mark.spec("CNV-18")
@@ -522,8 +560,11 @@ def test_a_chat_reply_that_is_a_command_line_is_run_at_once(desk, monkeypatch):
     chat("`/status`", lambda last: last == "Tinker is up.", "/status", "Tinker is up.", ahead=())
     handled = []
     monkeypatch.setattr(desk, "answer", lambda message, channel: handled.append(message.text))
-    chat("/fix the login bug", lambda last: handled == ["/fix the login bug"])
-    chat("/clear chat\n/fix the login bug", lambda last: handled[1:] == ["/clear chat", "/fix the login bug"])
+    chat("/fix the login bug", lambda last: handled == ["/fix the login bug"], confirm=True)
+    chat(
+        "/clear chat\n/fix the login bug",
+        lambda last: handled[1:] == ["/clear chat", "/fix the login bug"],
+    )
     chat("status is fine", lambda last: "status is fine" in last)
     assert all("`/status`" not in text and "/confirm" not in text for text in channel.texts())
     handled.clear()
@@ -602,6 +643,7 @@ def test_fresh_asks_the_model_again_what_the_chat_last_asked(desk, monkeypatch):
     chat("first answer", lambda last: "first answer" in last)
     wait_until(lambda: len(Scratchpad.fresh()) == 1)
     remembered_answer("do it for me", "Done from memory.")
+    unlearned(desk)
     replies = ["none", "low: a plain request", "fresh answer"]
     monkeypatch.setattr(
         Models, "quick_reply", staticmethod(lambda messages, *rest, **options: replies.pop(0))
@@ -646,10 +688,10 @@ def test_a_command_asked_in_words_is_answered_in_words(desk, monkeypatch):
     chat("/system time", lambda last: last == "It is **10:00**.", "It is **10:00**.")
     assert "raw /system time" in asked[-1][-1]["content"] and "do it for me" in asked[-1][-1]["content"]
     assert all("raw /system time" not in text for text in channel.texts())
-    chat("/rename jarvis", lambda last: last == "✅ raw /rename jarvis")
-    chat("/run tests", lambda last: last == "✅ raw /run tests")
+    chat("/rename jarvis", lambda last: last == "✅ raw /rename jarvis", confirm=True)
+    chat("/run tests", lambda last: last == "✅ raw /run tests", confirm=True)
     monkeypatch.setattr(desk, "answer", lambda message, channel: "fix started")
-    chat("/fix the login bug", lambda last: last == "fix started")
+    chat("/fix the login bug", lambda last: last == "fix started", confirm=True)
 
 
 @pytest.mark.spec("RVW-3")
@@ -1429,6 +1471,147 @@ def test_a_said_phrase_runs_its_command_and_a_deleting_one_asks_first(desk, monk
     wait_until(lambda: ["clear", "memory", "--yes"] in desk.ran)
 
 
+@pytest.mark.spec("CNV-3", "RTE-4")
+def test_a_retired_seed_route_no_longer_runs_its_command(desk, monkeypatch):
+    desk, channel, _ = desk
+    heard = []
+    monkeypatch.setattr(
+        desk.talk, "answer", lambda channel, message, *rest, **kwargs: heard.append(message.text)
+    )
+    Routes().apply([{"op": "retire", "id": Routes().find("clear memory")["id"], "why": "wrong"}])
+    say(desk, channel, "Clear the memory, please!")
+    assert desk.ran == [] and heard == ["Clear the memory, please!"]
+
+
+@pytest.mark.spec("RTE-7")
+def test_a_quiet_yes_after_a_glance_said_phrase_counts_a_use_and_adds_no_route(desk, monkeypatch):
+    desk, channel, _ = desk
+    monkeypatch.setattr(desk.talk, "answer", lambda *args, **kwargs: None)
+    routes_before = len(Routes().all())
+    say(desk, channel, "status")
+    say(desk, channel, "thanks")
+    route = Routes().find("status")
+    assert route["status"] == "confirmed" and route["uses"] == 1
+    assert [entry["event"] for entry in route["history"]] == ["add", "use"]
+    assert len(Routes().all()) == routes_before
+
+
+@pytest.mark.spec("RTE-7")
+def test_a_command_soon_after_a_routed_message_retires_the_route_and_adds_a_correction(desk, monkeypatch):
+    desk, channel, _ = desk
+    monkeypatch.setattr(desk.talk, "answer", lambda *args, **kwargs: None)
+    used = Routes().find("status")
+    say(desk, channel, "status")
+    say(desk, channel, "/runs")
+    retired = stored_route(used["id"])
+    added = Routes().find("status")
+    assert retired["status"] == "retired" and retired["retired"] == "/runs"
+    assert (added["line"], added["source"], added["status"]) == ("/runs", "correction", "candidate")
+
+
+def stored_route(route_id):
+    return next(route for route in Routes().all() if route["id"] == route_id)
+
+
+def learned_route(pattern, line, **more):
+    Routes().apply([{"op": "add", "pattern": pattern, "line": line, "source": "model"} | more])
+    return Routes().find(pattern)
+
+
+def routing_to(desk, monkeypatch, line, route=None, seen=lambda message: None):
+    def answer(channel, message, *args, on_command=None, **options):
+        seen(message)
+        desk.feedback.routed(message.chat, message.text, line, route, datetime.datetime.now())
+        on_command(line)
+
+    monkeypatch.setattr(desk.talk, "answer", answer)
+
+
+@pytest.fixture
+def proposing(desk, monkeypatch):
+    desk, channel, _ = desk
+    routing_to(desk, monkeypatch, "/resume #4")
+    say(desk, channel, "what went on in the fourth one #4")
+    return desk, channel
+
+
+def model_routes():
+    return [route for route in Routes().all() if route["source"] == "model"]
+
+
+@pytest.mark.spec("RTE-6")
+def test_a_routed_model_line_is_proposed_in_plain_words_with_yes_and_no(proposing):
+    desk, channel = proposing
+    proposal = channel.texts()[-1]
+    what = desk_module.BY_NAME["resume"].what
+    assert proposal == f"I think you mean resume: {what} (#4). Shall I?" and "/" not in proposal
+    assert channel.log[-1][0] == "yes_no" and desk.ran == []
+
+
+@pytest.mark.spec("RTE-6", "RTE-7")
+def test_a_yes_to_a_routed_proposal_runs_it_and_adds_a_model_candidate(proposing):
+    desk, channel = proposing
+    say(desk, channel, "/confirm")
+    wait_until(lambda: len(model_routes()) == 1)
+    [added] = model_routes()
+    assert added["status"] == "candidate" and added["line"].startswith("/resume")
+
+
+@pytest.mark.spec("RTE-6", "RTE-7")
+def test_a_no_to_a_routed_proposal_shows_not_run_and_keeps_nothing(proposing):
+    desk, channel = proposing
+    say(desk, channel, "/cancel")
+    assert "🚫 _Not run_" in channel.texts()[-1] and not any("No command" in text for text in channel.texts())
+    assert desk.ran == [] and model_routes() == [] and desk.questions.by_chat == {}
+
+
+@pytest.mark.spec("RTE-6")
+def test_a_plain_message_amends_a_routed_proposal_and_proposes_again(proposing, monkeypatch):
+    desk, channel = proposing
+    proposal = channel.texts()[-1]
+    amends = []
+    routing_to(
+        desk,
+        monkeypatch,
+        "/resume #5",
+        seen=lambda message: amends.append((message.text, desk.talk.amending.get(message.chat))),
+    )
+    say(desk, channel, "no, its log")
+    assert any(text.startswith(f"{proposal}\n🚫 _Not run_") for text in channel.texts())
+    assert amends == [("no, its log", ("what went on in the fourth one #4", proposal))]
+    assert desk.ran == [] and channel.log[-1][0] == "yes_no"
+    assert "#5" in channel.texts()[-1] and channel.texts()[-1] != proposal
+
+
+@pytest.mark.spec("RTE-7")
+def test_an_amend_retires_the_candidate_route_that_gave_the_proposal(desk, monkeypatch):
+    desk, channel, _ = desk
+    Routes().apply([{"op": "add", "pattern": "fourth one JOB", "line": "/resume JOB", "source": "model"}])
+    candidate = Routes().find("fourth one JOB")
+    routing_to(desk, monkeypatch, "/resume #4", candidate)
+    say(desk, channel, "the fourth one #4")
+    say(desk, channel, "no, its log")
+    assert stored_route(candidate["id"])["status"] == "retired"
+
+
+@pytest.mark.spec("RTE-6")
+def test_an_amend_routes_again_past_learned_routes_with_the_original_and_the_proposal(
+    measured_model, fake_ollama
+):
+    fake_ollama.reply("/runs")
+    talk = routed_talk(("log JOB", "/log JOB"))
+    talk.amend("1", "what went on #4", "I think you mean resume it (#4). Shall I?")
+    assert talk.reply(Recorder(), Message("1", "no, show the log #4")) == "/runs"
+    [call] = route_calls(fake_ollama.calls)
+    said = [turn["content"] for turn in call["messages"][1:]]
+    assert said == [
+        "what went on #4",
+        "I think you mean resume it (#4). Shall I?",
+        "no, show the log #4",
+    ]
+    assert talk.reply(Recorder(), Message("1", "show the log #4")) == "/log #4"
+
+
 def test_a_said_phrase_answering_a_waiting_question_is_not_a_command(desk, monkeypatch):
     desk, channel, _ = desk
     monkeypatch.setattr(desk.talk, "answer", lambda *args, **kwargs: None)
@@ -2128,6 +2311,95 @@ def test_a_message_routed_to_none_is_reviewed_and_answered_without_the_commands(
     )
 
 
+def routed_talk(*seeds):
+    Routes().seed(seeds)
+    return Talk("task", routes=Routes())
+
+
+def route_calls(calls):
+    route_system = desk_module.Prompts.CHAT_ROUTE_SYSTEM.format(index=desk_module.chat_index())
+    return [call for call in calls if system_of(call).startswith(route_system)]
+
+
+@pytest.mark.spec("CNV-18", "RTE-4", "RTE-6")
+@pytest.mark.parametrize("confirmed", [True, False])
+def test_a_message_matching_a_confirmed_or_candidate_route_gives_its_line_with_no_model_call(
+    measured_model, fake_ollama, confirmed
+):
+    Routes().apply(
+        [{"op": "add", "pattern": "log JOB", "line": "/log JOB", "source": "model", "confirmed": confirmed}]
+    )
+    talk = Talk("task", routes=Routes())
+    assert talk.reply(Recorder(), Message("1", "show the log #4")) == "/log #4"
+    assert fake_ollama.calls == []
+
+
+@pytest.mark.spec("CNV-18", "RTE-4")
+def test_a_learned_route_to_instruct_runs_it_with_the_message(measured_model, fake_ollama):
+    talk = routed_talk(("clean up downloads folder", "/instruct"))
+    reply = talk.reply(Recorder(), Message("1", "clean up the downloads folder"))
+    assert reply == "/instruct clean up the downloads folder"
+    assert fake_ollama.calls == []
+
+
+@pytest.mark.spec("CNV-18", "RTE-4")
+def test_a_learned_route_to_none_answers_in_words_without_the_route_call(
+    measured_model, fake_ollama, monkeypatch
+):
+    monkeypatch.setattr(ThinkLevels, "values", staticmethod(lambda name: ["low", "medium", "high"]))
+    fake_ollama.reply("low: a plain request").reply("It is a bird.")
+    talk = routed_talk(("tell about robin", "none"))
+    assert talk.reply(Recorder(), Message("1", "tell me about the robin")) == "It is a bird."
+    assert fake_ollama.calls and route_calls(fake_ollama.calls) == []
+
+
+@pytest.mark.spec("CNV-18", "RTE-4")
+def test_a_message_missing_the_learned_routes_still_asks_the_route_model(measured_model, fake_ollama):
+    fake_ollama.reply("/runs")
+    talk = routed_talk(("log JOB", "/log JOB"))
+    assert talk.reply(Recorder(), Message("1", "which projects are there")) == "/runs"
+    assert len(route_calls(fake_ollama.calls)) == 1
+
+
+@pytest.mark.spec("RTE-7")
+def test_a_reply_in_words_followed_by_a_plain_message_adds_a_route_to_none(home_store):
+    feedback = RouteFeedback(Routes(), dict, quiet_line)
+    talk = Talk("task", feedback=feedback)
+    talk.answering(
+        Recorder(),
+        Message("1", "tell me about the robin"),
+        lambda: [],
+        desk_module.NO_CHAT_STATE,
+        lambda *asked: "It is a bird.",
+        None,
+        lambda line: None,
+    )
+    feedback.heard("1", "and the crow?", datetime.datetime.now())
+    added = Routes().find("tell about robin")
+    assert (added["line"], added["source"], added["status"]) == ("none", "model", "candidate")
+
+
+def answered_on(talk, text):
+    talk.answering(
+        Recorder(), Message("1", text), lambda: [], desk_module.NO_CHAT_STATE, talk.reply, None, None
+    )
+    [episode] = Scratchpad.fresh()
+    return episode
+
+
+@pytest.mark.spec("REM-1", "RTE-4")
+def test_a_chat_episode_keeps_the_learned_route_it_used(measured_model, fake_ollama):
+    talk = routed_talk(("log JOB", "/log JOB"))
+    route_id = Routes().find("log JOB")["id"]
+    assert answered_on(talk, "show the log #4")["route"] == route_id
+
+
+@pytest.mark.spec("REM-1", "RTE-4")
+def test_a_chat_episode_with_no_learned_route_keeps_an_empty_route(measured_model, fake_ollama):
+    fake_ollama.reply("/runs")
+    assert answered_on(routed_talk(), "which projects are there")["route"] == ""
+
+
 @pytest.mark.spec("CNV-18", "REM-6")
 def test_the_route_call_with_nothing_recalled_keeps_its_prompt(measured_model, fake_ollama):
     fake_ollama.reply("/runs")
@@ -2475,6 +2747,43 @@ def test_a_cancel_of_a_routed_instructions_later_proposal_stays_inside(routed_in
     assert "words: list the big files" not in channel.texts()
 
 
+def route_an_instruction(instruction_desk, route):
+    desk, channel, _ = instruction_desk
+    message = Message("1", "list the big files")
+    desk.feedback.routed("1", message.text, "/instruct list the big files", route, datetime.datetime.now())
+    desk.replied(channel, message, "/instruct list the big files")
+    return desk, channel
+
+
+@pytest.fixture
+def candidate_instruction(home_store):
+    return learned_route("list the big files", "/instruct list the big files")
+
+
+@pytest.mark.spec("RTE-7")
+def test_a_cancel_of_a_routed_instructions_first_proposal_retires_the_candidate_that_gave_it(
+    instruction_desk, candidate_instruction
+):
+    desk, channel = route_an_instruction(instruction_desk, candidate_instruction)
+    desk.handle(channel, Message("1", "/cancel"))
+    (route,) = model_routes()
+    assert (route["status"], route["retired"]) == ("retired", "no")
+
+
+@pytest.mark.spec("RTE-7")
+def test_a_cancel_of_a_model_routed_instructions_first_proposal_keeps_nothing(instruction_desk, home_store):
+    desk, channel = route_an_instruction(instruction_desk, None)
+    desk.handle(channel, Message("1", "/cancel"))
+    assert model_routes() == [] and not [route for route in Routes().all() if route["source"] == "correction"]
+
+
+@pytest.mark.spec("RTE-7")
+def test_any_other_message_after_a_routed_instruction_is_a_quiet_yes(instruction_desk, candidate_instruction):
+    desk, channel = route_an_instruction(instruction_desk, candidate_instruction)
+    desk.handle(channel, Message("1", "only the big ones"))
+    assert Routes().find("list the big files")["status"] == "confirmed"
+
+
 @pytest.fixture
 def instruction_desk(desk, monkeypatch):
     desk, channel, _ = desk
@@ -2605,7 +2914,7 @@ def test_inside_an_instruction_a_message_is_the_amend_cancelling_the_proposal_qu
 @pytest.mark.spec("CNV-25")
 def test_inside_an_instruction_a_said_command_is_the_amend_not_the_command(instructed):
     desk, channel, proposed = instructed
-    assert desk_module.said_command("run it") == "/dream run"
+    assert said_line(desk, "run it") == "/dream run"
     desk.handle(channel, Message("1", "/confirm"))
     wait_until(lambda: channel.texts()[-1].startswith("▶️ **Running**"))
     assert not desk.questions.waiting(channel, "1")
@@ -3855,3 +4164,118 @@ def test_help_text_does_not_pass_on_the_runner_job(tinker_home, monkeypatch):
     monkeypatch.setenv("TINKER_RUNNER_JOB", "7")
     desk_module.help_text()
     assert "TINKER_RUNNER_JOB" not in ran[0]
+
+
+@pytest.fixture
+def talking(desk, measured_model, fake_ollama):
+    desk, channel, _ = desk
+    return desk, channel, fake_ollama
+
+
+FOURTH = "what went on in the fourth one #4"
+
+
+def pattern_of(text):
+    return " ".join(mask(text, {}).words)
+
+
+def proposed_by_the_model(desk, channel, fake_ollama, command, line):
+    fake_ollama.reply(command).reply(line)
+    shown = len(channel.texts())
+    say(desk, channel, FOURTH)
+    wait_until(lambda: len(channel.texts()) > shown and channel.texts()[-1].startswith("I think you mean"))
+
+
+def amended_by_the_model(desk, channel, fake_ollama, text, command, line):
+    fake_ollama.reply(command).reply(line)
+    shown = len(channel.texts())
+    say(desk, channel, text)
+    wait_until(lambda: len(channel.texts()) > shown + 1 and channel.log[-1][0] == "yes_no")
+
+
+def amended_into_a_glance(desk, channel, fake_ollama):
+    proposed_by_the_model(desk, channel, fake_ollama, "/resume", "/resume #4")
+    asked = sum(entry[0] == "yes_no" for entry in channel.log)
+    fake_ollama.reply("/log").reply("/log #4").reply("told")
+    say(desk, channel, "no, its log")
+    wait_until(lambda: "told" in channel.texts())
+    return asked
+
+
+@pytest.mark.spec("RTE-6")
+def test_an_amended_glance_runs_at_once_with_no_yes_or_no(talking):
+    desk, channel, fake_ollama = talking
+    assert desk_module.quiet_line("/log #4")
+    asked = amended_into_a_glance(desk, channel, fake_ollama)
+    assert desk.ran == [["log", "#4"]]
+    assert sum(entry[0] == "yes_no" for entry in channel.log) == asked
+
+
+@pytest.mark.spec("RTE-6", "RTE-7")
+def test_a_later_message_is_the_quiet_yes_of_an_amended_glance_under_the_original_pattern(
+    talking, monkeypatch
+):
+    desk, channel, fake_ollama = talking
+    amended_into_a_glance(desk, channel, fake_ollama)
+    monkeypatch.setattr(desk.talk, "answer", lambda *args, **kwargs: None)
+    say(desk, channel, "thanks")
+    [added] = model_routes()
+    assert (added["line"], added["pattern"]) == ("/log JOB", pattern_of(FOURTH))
+
+
+@pytest.mark.spec("RTE-6")
+def test_a_yes_to_an_amended_proposal_learns_the_original_messages_pattern(talking):
+    desk, channel, fake_ollama = talking
+    proposed_by_the_model(desk, channel, fake_ollama, "/stop", "/stop #4")
+    amended_by_the_model(desk, channel, fake_ollama, "no, resume it", "/resume", "/resume #4")
+    say(desk, channel, "/confirm")
+    wait_until(lambda: model_routes())
+    [added] = model_routes()
+    assert added["pattern"] == pattern_of(FOURTH)
+
+
+@pytest.mark.spec("RTE-7")
+def test_a_reply_the_model_failed_to_give_teaches_no_route(talking, monkeypatch):
+    from tinkerkit.model.models import OllamaError
+
+    desk, channel, fake_ollama = talking
+    fake_ollama.reply(OllamaError("runner failed"))
+    say(desk, channel, "how is the weather today")
+    wait_until(lambda: any("did not answer" in text for text in channel.texts()))
+    monkeypatch.setattr(desk.talk, "answer", lambda *args, **kwargs: None)
+    say(desk, channel, "thanks")
+    assert model_routes() == []
+
+
+@pytest.mark.spec("RTE-7")
+def test_a_confirmed_route_answered_in_words_counts_a_use(talking):
+    desk, channel, fake_ollama = talking
+    learned_route(pattern_of("how is the weather today"), "none", confirmed=True)
+    fake_ollama.reply("Sunny.")
+    say(desk, channel, "how is the weather today")
+    wait_until(lambda: any("Sunny." in text for text in channel.texts()))
+    [route] = model_routes()
+    assert route["uses"] == 1
+
+
+@pytest.mark.spec("RTE-6")
+def test_an_amend_answered_from_a_remembered_answer_leaves_no_amend_waiting(talking):
+    desk, channel, fake_ollama = talking
+    remembered_answer("how tall is everest in km", "About 8.85 km.")
+    proposed_by_the_model(desk, channel, fake_ollama, "/resume", "/resume #4")
+    say(desk, channel, "How tall is Everest in km?")
+    wait_until(lambda: any("8.85" in text for text in channel.texts()))
+    assert desk.talk.amending == {}
+
+
+@pytest.mark.spec("RTE-4")
+def test_a_message_answering_a_waiting_question_is_not_matched_by_the_learned_routes(talking):
+    desk, channel, fake_ollama = talking
+    fake_ollama.reply("told", times=3)
+    say(desk, channel, "/clear memory")
+    wait_until(lambda: desk.ran)
+    say(desk, channel, "status")
+    wait_until(lambda: any(text.startswith("told") for text in channel.texts()))
+    events = [entry["event"] for entry in Routes().find("status")["history"]]
+    shown = [call["messages"][-1]["content"] for call in fake_ollama.calls]
+    assert events == ["add"] and not any("Command: /status" in text for text in shown)

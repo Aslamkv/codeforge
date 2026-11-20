@@ -80,6 +80,9 @@ class Recorder(Channel):
     def offer_run(self, chat, shown, label):
         self.log.append(("run", chat, shown, label))
 
+    def offer_yes_no(self, chat, shown):
+        self.log.append(("yes_no", chat, shown, ""))
+
     def send_file(self, chat, path, caption):
         self.log.append(("file", chat, path, caption))
         return super().send_file(chat, path, caption)

@@ -475,6 +475,25 @@ def test_offer_run_puts_run_then_leave_on_the_proposal():
     telegram(BotAPI(editMessageReplyMarkup=OSError("down"))).offer_run("42", 7, "🚪 Leave #3")
 
 
+@pytest.mark.spec("RTE-6")
+def test_offer_yes_no_puts_yes_then_no_on_the_proposal():
+    api = BotAPI()
+    telegram(api).offer_yes_no("42", 7)
+    [(path, fields)] = api.calls
+    assert (
+        path.endswith("editMessageReplyMarkup") and fields["chat_id"] == "42" and fields["message_id"] == "7"
+    )
+    assert json.loads(fields["reply_markup"]) == {
+        "inline_keyboard": [
+            [
+                {"text": "✅ Yes", "callback_data": "/confirm"},
+                {"text": "❌ No", "callback_data": "/cancel"},
+            ]
+        ]
+    }
+    telegram(BotAPI(editMessageReplyMarkup=OSError("down"))).offer_yes_no("42", 7)
+
+
 @pytest.mark.spec("INT-1")
 def test_offer_answers_puts_skip_then_leave_on_the_question():
     api = BotAPI()

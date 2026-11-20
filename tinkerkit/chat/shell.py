@@ -32,7 +32,9 @@ ShellRun = namedtuple("ShellRun", "code output")
 
 
 Question = namedtuple(
-    "Question", "runs cancels held wanted naming", defaults=(None, lambda: None, None, None, False)
+    "Question",
+    "runs cancels held wanted naming amends",
+    defaults=(None, lambda: None, None, None, False, None),
 )
 
 

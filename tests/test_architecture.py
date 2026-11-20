@@ -18,6 +18,7 @@ LAYERS = (
     "settings",
     "formats",
     "memory.memories",
+    "memory.routes",
     "logger",
     "system",
     "commands",

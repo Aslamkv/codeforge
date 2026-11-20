@@ -14,6 +14,7 @@ lazy import urllib.parse
 lazy from pathlib import Path
 
 from ..desk import (
+    CHAT_CANCEL,
     CHAT_CONFIRM,
     CHAT_FRESH,
     CHAT_LEAVE,
@@ -21,8 +22,10 @@ from ..desk import (
     FRESH_ANSWER_BUTTON,
     LEAVE_INTERVIEW_BUTTON,
     NEXT_PAGE_BUTTON,
+    NO_BUTTON,
     RUN_BUTTON,
     SKIP_QUESTION_BUTTON,
+    YES_BUTTON,
     Desk,
     NoInterview,
     NoShelf,
@@ -475,6 +478,20 @@ class TelegramChannel(Channel):
         moves = [
             {"text": RUN_BUTTON, "callback_data": CHAT_CONFIRM},
             {"text": label, "callback_data": CHAT_LEAVE},
+        ]
+        return {"reply_markup": json.dumps({"inline_keyboard": [moves]})}
+
+    def offer_yes_no(self, chat, shown):
+        try:
+            self.call("editMessageReplyMarkup", chat_id=chat, message_id=shown, **self.yes_no_buttons())
+        except OSError, ChannelError:
+            pass
+
+    @staticmethod
+    def yes_no_buttons():
+        moves = [
+            {"text": YES_BUTTON, "callback_data": CHAT_CONFIRM},
+            {"text": NO_BUTTON, "callback_data": CHAT_CANCEL},
         ]
         return {"reply_markup": json.dumps({"inline_keyboard": [moves]})}
 

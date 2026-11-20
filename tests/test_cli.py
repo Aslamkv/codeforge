@@ -1050,10 +1050,11 @@ def test_memory_refuses_words_it_cannot_read(home_store, capsys):
         ["what"],
         ["show", "a", "b"],
         ["graph", "now"],
+        ["routes", "now"],
     ):
         with pytest.raises(SystemExit):
             parse("memory", *wrong)
-        assert "| traits | graph" in capsys.readouterr().err
+        assert "| traits | routes | graph" in capsys.readouterr().err
 
 
 @pytest.mark.spec("DRM-8")
