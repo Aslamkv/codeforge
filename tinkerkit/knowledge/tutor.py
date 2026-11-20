@@ -440,7 +440,6 @@ class Teacher:
             + [("Not changed", line) for line in skipped]
         )
         if not made:
-            say.stop("Nothing changed")
             return ending("blocked", "Nothing changed", details)
         return ending("done", f"Corrected: {len(made)} change(s)", details)
 

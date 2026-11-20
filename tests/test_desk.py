@@ -1615,6 +1615,15 @@ def test_an_amend_routes_again_past_learned_routes_with_the_original_and_the_pro
     assert talk.reply(Recorder(), Message("1", "show the log #4")) == "/log #4"
 
 
+def test_an_amend_while_answering_lets_the_next_message_match_learned_routes(measured_model, fake_ollama):
+    fake_ollama.reply("/runs")
+    talk = routed_talk(("log JOB", "/log JOB"))
+    talk.amend("1", "what went on #4", "I think you mean resume it (#4). Shall I?")
+    talk.answering_chats.add("1")
+    assert talk.reply(Recorder(), Message("1", "no, show the log #4")) == "/runs"
+    assert talk.reply(Recorder(), Message("1", "show the log #4")) == "/log #4"
+
+
 def test_a_said_phrase_answering_a_waiting_question_is_not_a_command(desk, monkeypatch):
     desk, channel, _ = desk
     monkeypatch.setattr(desk.talk, "answer", lambda *args, **kwargs: None)

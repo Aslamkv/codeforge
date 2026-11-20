@@ -1143,9 +1143,32 @@ class StandInJob:
 def stand_in_job(monkeypatch):
     job = StandInJob()
     monkeypatch.setattr(Runner, "last_started", None)
+    monkeypatch.setattr(Runner, "idle_since", None)
     monkeypatch.setattr(Runner, "detach", staticmethod(job.detach))
     monkeypatch.setattr(jobs, "signal_job", lambda job: None)
     return job
+
+
+THREAD_END_SECONDS = 5
+
+
+def joined(thread):
+    thread.join(THREAD_END_SECONDS)
+    assert not thread.is_alive(), f"{thread.name} still runs after {THREAD_END_SECONDS}s"
+
+
+@pytest.fixture
+def side_threads():
+    threads = []
+    yield threads
+    for thread in threads:
+        joined(thread)
+
+
+def started_in(threads, target, *args):
+    thread = threading.Thread(target=target, args=args)
+    threads.append(thread)
+    thread.start()
 
 
 def go_through_queue():
@@ -1153,14 +1176,18 @@ def go_through_queue():
         Runner.go_through()
 
 
-def hosting_go_through(cls):
-    threading.Thread(target=go_through_queue).start()
-    return True
+@pytest.fixture
+def hosting_go_through(side_threads):
+    def host(cls):
+        started_in(side_threads, go_through_queue)
+        return True
+
+    return host
 
 
 @pytest.mark.spec("JOB-10")
 def test_a_job_command_hosting_the_runner_follows_only_its_own_job(
-    home_store, stand_in_job, monkeypatch, capsys, tmp_path
+    home_store, stand_in_job, hosting_go_through, monkeypatch, capsys, tmp_path
 ):
     monkeypatch.setattr(Runner, "host", classmethod(hosting_go_through))
     put_job(home_store, 1, state="queued", pid=None)
@@ -1185,8 +1212,11 @@ def test_a_follower_shows_only_output_written_after_it_began(home_store, stand_i
     follower = jobs.Follower(1)
     stand_in_job.code = 3
     capsys.readouterr()
-    threading.Timer(0.05, stand_in_job.run_job, args=(1,)).start()
-    assert follower.follow(hosting=False) == 3 and capsys.readouterr().out == "one\ntwo\n"
+    late_run = threading.Timer(0.05, stand_in_job.run_job, args=(1,))
+    late_run.start()
+    code = follower.follow(hosting=False)
+    joined(late_run)
+    assert code == 3 and capsys.readouterr().out == "one\ntwo\n"
 
 
 class BufferedOutput:
@@ -1229,7 +1259,7 @@ def test_ctrl_c_in_a_follower_ends_it_and_leaves_the_job_queued(home_store, stan
 @pytest.mark.spec("JOB-10")
 @pytest.mark.parametrize(("code", "ended_with"), [(2, 2), (0, 0), (-15, 0)])
 def test_a_job_command_ends_with_its_jobs_exit_code_when_above_0(
-    home_store, stand_in_job, monkeypatch, tmp_path, code, ended_with
+    home_store, stand_in_job, hosting_go_through, monkeypatch, tmp_path, code, ended_with
 ):
     stand_in_job.code = code
     monkeypatch.setattr(Runner, "host", classmethod(hosting_go_through))
@@ -1254,7 +1284,9 @@ def test_a_follower_returns_its_jobs_exit_code_when_above_0(
 
 
 @pytest.mark.spec("JOB-10")
-def test_the_job_a_process_follows_is_found_by_that_process(home_store, stand_in_job, monkeypatch, tmp_path):
+def test_the_job_a_process_follows_is_found_by_that_process(
+    home_store, stand_in_job, hosting_go_through, monkeypatch, tmp_path
+):
     monkeypatch.setattr(Runner, "host", classmethod(hosting_go_through))
     monkeypatch.chdir(tmp_path)
     with pytest.raises(SystemExit), Jobs.running(["learn", "rust"]):
@@ -1263,12 +1295,14 @@ def test_the_job_a_process_follows_is_found_by_that_process(home_store, stand_in
 
 
 @pytest.mark.spec("JOB-10")
-def test_a_job_command_ends_once_its_job_leaves_the_queue(home_store, stand_in_job, monkeypatch, capsys):
+def test_a_job_command_ends_once_its_job_leaves_the_queue(
+    home_store, stand_in_job, side_threads, monkeypatch, capsys
+):
     asked_to_host = []
 
     def another_tinker_hosts(cls):
         if not asked_to_host:
-            threading.Thread(target=stand_in_job.run_job, args=(Queue.head(),)).start()
+            started_in(side_threads, stand_in_job.run_job, Queue.head())
         asked_to_host.append(True)
         return False
 

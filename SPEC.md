@@ -1016,7 +1016,8 @@ Each request's one thinking level.
 - **PRJ-19** `TrackedWork(started_at, voice).run(title, setup, work, blocked=None)` runs a command's job: the
   voice follows a new `Tracker` titled `title`, `setup(tracker)` gives the job's tools and `work(tracker,
   *tools)` its ending. When it stops (`SystemExit`) the ending is `blocked(stopped)`, or without one `blocked`
-  with the first line of why; it is `stopped` when nothing ended it. However it ends, it remembers the model
+  with the first line of why; it is `stopped` when nothing ended it. When the work itself ends `blocked`, it says
+  that ending's headline (⚠️), since nothing else told the person. However it ends, it remembers the model
   (the first tool, **MOD-1**), says `Time taken` counted from `started_at` (**PRJ-17**) and ends the tracker
   with the ending, then lets the stop go on. Learn, research, ask, teach, read, dream run, skill and exercise
   jobs all run this way.
@@ -1807,7 +1808,8 @@ Nothing here calls the model.
 - **REM-7** `tinker memory [PAGE]` lists the memories not retired, newest `last_seen` first, a page at a time,
   each as its id, kind and gist; then how many episodes are fresh, how many memories are retired, when the last
   dream was, and what to do next (`memory show ID`, `memory forget ID`, `memory traits`, `dream`). With no memory,
-  it says a dream makes them from what the person does.
+  it says a dream makes them from what the person does; when memories were made but all are retired, it says none
+  is kept now.
 - **REM-8** `tinker memory show ID` shows one memory or episode whole (a memory with its sources); an unknown
   id is refused with why.
 - **REM-9** `tinker memory forget ID` deletes one memory or episode, as a deletion (**SET-8**); for a trait id it
@@ -1930,8 +1932,8 @@ Every dream reflects at its end (**DRM-11**), and the dialogue reflects live whe
   `learn` is a topic queued as `learn TOPIC` (**LRN**) at the queue's back (**JOB-8**), at most one per loop, the later ones dropped. The round's
   `thought` joins the loop's.
 - **REF-2** `Reflection.run()` makes rounds until one says `done`, or keeps nothing new (no question, note,
-  retire or learn), or `REFLECT_ROUNDS` (20) rounds are made. It gives back the loop's thoughts, its caller keeping
-  the newest `REFLECT_THOUGHTS` for the next loop, and what each round kept.
+  retire or learn), or `REFLECT_ROUNDS` (20) rounds are made. It gives back each round as it ends, with what that
+  round kept and the loop's thoughts so far, its caller keeping the newest `REFLECT_THOUGHTS` for the next loop.
 - **REF-3** The prompt holds `TINKER_PURPOSE`, what Tinker is for in the words of [The idea](#the-idea); says a trait
   is lasting, never a passing state (as **DRM-6**); tells the model `REFLECT_WAITING` (12) questions waiting is
   plenty, as a guideline and never a block; that a question like one waiting, or about a trait the person retired,
@@ -1968,7 +1970,8 @@ the person (**INT**).
 - **DRM-2** `Dream.run()` goes through its steps in turn, consolidate, revise, decay, traits, merge traits (**DRM-12**),
   merge principles (**DRM-13**), gists, reflect (**DRM-11**) and compact (**DRM-14**), each saved
   when done in `dream`/`state`, so a dream that goes on skips the steps done; its tracker's `doing` names the
-  step.
+  step. With no model in use it changes nothing and ends saying no model is in use and `tinker model NAME` picks
+  one.
 - **DRM-3** Consolidate takes the fresh episodes chat by chat, at most `DREAM_BATCH_EPISODES` (12) to a call.
   Each episode of the batch keeps its id, chat and time and names who each other part came from: `person`
   holds what the person said (its message, request or task), `tinker` all Tinker said and did (its reply,
@@ -2007,7 +2010,8 @@ the person (**INT**).
   The prompt says a trait is lasting (work, goals, likes, ways of working), never a passing state (the folder, the
   time, one command's output), and that each add's question, thought and expected are shown to the person, in plain
   words that name no id.
-- **DRM-7** Each change a dream makes is added to log `dream events` as `{step, change, id, gist}`.
+- **DRM-7** Each change a dream makes is added to log `dream events` as `{step, change, id, gist}` when it is
+  made.
 - **DRM-8** `tinker dream` (or `dream status`) says when the last dream was, how many changes each step made,
   how many episodes and questions wait, and whether a dream is queued or running. A dream's time is when it began,
   to the second; a change "since the last dream" is one at or after that time, so nothing changed while it ran is

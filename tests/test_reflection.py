@@ -202,7 +202,7 @@ def test_run_stops_on_done_and_gives_back_every_round_and_thought(home_store, mo
     earlier = [f"old {number}" for number in range(REFLECT_THOUGHTS + 3)]
     reflection = Reflection(thoughts=earlier)
 
-    rounds = reflection.run(NOW)
+    rounds = list(reflection.run(NOW))
 
     assert [round_["thought"] for round_ in rounds] == ["one", "two"]
     assert [len(round_["kept"]) for round_ in rounds] == [1, 1]
@@ -220,7 +220,7 @@ def test_run_stops_after_a_round_that_keeps_nothing_new(home_store, monkeypatch)
         {"thought": "three", "add": [], "questions": [opened("Never asked")], "done": False},
     )
 
-    rounds = Reflection().run(NOW)
+    rounds = list(Reflection().run(NOW))
 
     assert len(asked) == 2
     assert [len(round_["kept"]) for round_ in rounds] == [1, 0]
@@ -238,7 +238,7 @@ def test_run_stops_after_the_rounds_allowed_or_a_failed_round(home_store, monkey
     ]
     asked = replying(monkeypatch, *replies)
 
-    assert len(Reflection().run(NOW)) == REFLECT_ROUNDS
+    assert len(list(Reflection().run(NOW))) == REFLECT_ROUNDS
     assert len(asked) == REFLECT_ROUNDS
 
     asked = replying(
@@ -437,7 +437,7 @@ def test_a_loop_queues_at_most_one_learn(home_store, monkeypatch):
         reflected(done=True),
     )
 
-    rounds = Reflection().run(NOW)
+    rounds = list(Reflection().run(NOW))
 
     assert [round_["learn"] for round_ in rounds] == ["git rebasing", "", ""]
     assert [job["arguments"] for job in Jobs.every()] == [["learn", "git rebasing"]]
@@ -452,7 +452,7 @@ def test_run_goes_on_after_a_round_that_keeps_only_a_note(home_store, monkeypatc
         reflected(notes=["Something else entirely about builds"]),
     )
 
-    rounds = Reflection().run(NOW)
+    rounds = list(Reflection().run(NOW))
 
     assert len(asked) == 2
     assert [round_["notes"] for round_ in rounds] == [["I answer chats well"], []]
@@ -467,7 +467,7 @@ def test_run_stops_after_a_round_whose_only_note_is_alike_to_a_kept_one(home_sto
         reflected(notes=["Something else entirely about builds"]),
     )
 
-    rounds = Reflection().run(NOW)
+    rounds = list(Reflection().run(NOW))
 
     assert len(asked) == 1
     assert [round_["notes"] for round_ in rounds] == [[]]

@@ -2528,11 +2528,12 @@ class Talk:
         return self.modeled_route_reply(channel, message, asked, memories, state, thread, tokens)
 
     def learned_route(self, message, asked):
+        answering = message.chat in self.answering_chats
+        self.answering_chats.discard(message.chat)
         if amended := self.amending.pop(message.chat, None):
             self.amended_texts[id(message)] = amended[0]
             return amend_turns(*amended) + asked, None
-        if message.chat in self.answering_chats:
-            self.answering_chats.discard(message.chat)
+        if answering:
             return asked, None
         matched = self.routes.match(message.text, self.known())
         if not matched:

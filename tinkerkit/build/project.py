@@ -764,6 +764,7 @@ class TrackedWork:
         try:
             tools = setup(tracker)
             ended = work(tracker, *tools)
+            self.say_if_blocked(ended)
         except SystemExit as stopped:
             ended = blocked(stopped) if blocked else ending("blocked", first_line(str(stopped), 200))
             raise
@@ -773,6 +774,10 @@ class TrackedWork:
             took = time.time() - self.started_at.timestamp()
             self.voice.title(f"Time taken: {human_duration(took)}", "⏱️")
             tracker.end(ended, took)
+
+    def say_if_blocked(self, ended):
+        if ended["status"] == "blocked":
+            self.voice.title(ended["headline"], "⚠️")
 
 
 class Subsystem:

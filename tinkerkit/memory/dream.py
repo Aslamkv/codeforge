@@ -95,8 +95,9 @@ class Dream:
         self.state = new_state()
 
     def run(self, now=None):
-        if Models.quick():
-            self.walked(now)
+        if not Models.quick():
+            return ending("blocked", "No model is in use yet: `tinker model NAME` picks one")
+        self.walked(now)
         return ending("done", "Dreamt")
 
     def walked(self, now):

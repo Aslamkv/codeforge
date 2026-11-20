@@ -1039,6 +1039,18 @@ def test_memory_with_nothing_remembered_says_a_dream_makes_them(home_store, caps
     assert "a dream makes them from what you do" in out and "no dream yet" in out
 
 
+@pytest.mark.spec("REM-7")
+def test_memory_with_all_retired_says_none_is_kept_now(home_store, capsys):
+    memory = memories().add("fact", "Lists files", "The person lists files often.", ["e1"], NOW)
+    memories().retire(memory["id"], "faded")
+
+    show_memories()
+
+    out = capsys.readouterr().out
+    assert "No memory is kept now" in out and "1 retired memory" in out
+    assert "Nothing remembered yet" not in out
+
+
 @pytest.mark.spec("REM-8")
 def test_show_gives_a_memory_whole_with_its_sources_and_gone_ones(home_store, capsys):
     Scratchpad.write(chat_episode(), NOW)

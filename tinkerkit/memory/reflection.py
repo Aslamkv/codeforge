@@ -32,15 +32,13 @@ class Reflection:
         self.learned = False
 
     def run(self, now=None):
-        rounds = []
         for _ in range(REFLECT_ROUNDS):
             kept = self.round(now)
             if kept is None:
-                break
-            rounds.append(kept)
+                return
+            yield kept
             if kept["done"] or not kept_anything(kept):
-                break
-        return rounds
+                return
 
     def round(self, now=None):
         seen, shown_gaps = evidence(), holding({"gaps": gaps()}).get("gaps", {})

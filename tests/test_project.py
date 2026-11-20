@@ -708,6 +708,9 @@ class HeardVoice(Voice):
     def title(self, text, icon=""):
         self.heard.append(("title", text))
 
+    def titles(self):
+        return [text for kind, text in self.heard if kind == "title"]
+
 
 @pytest.fixture
 def tracked_work(monkeypatch):
@@ -781,10 +784,21 @@ def test_a_stop_ends_tracked_work_as_blocked_with_the_first_line_of_why(tracked_
     def stopping(tracker, model):
         raise SystemExit("no room\nmore")
 
+    voice = HeardVoice()
     with pytest.raises(SystemExit):
-        TrackedWork(thirty_seconds_ago(), HeardVoice()).run("Asking", lambda tracker: ("model",), stopping)
+        TrackedWork(thirty_seconds_ago(), voice).run("Asking", lambda tracker: ("model",), stopping)
     assert tracked_work["ended"] == ending("blocked", "no room")
     assert tracked_work["remembered"] == ["model"]
+    assert voice.titles() == ["Time taken: 30s"]
+
+
+@pytest.mark.spec("PRJ-19")
+def test_tracked_work_says_a_blocked_ending_its_work_gave_before_the_time_taken(tracked_work):
+    voice = HeardVoice()
+    TrackedWork(thirty_seconds_ago(), voice).run(
+        "Dreaming", lambda tracker: (), lambda tracker: ending("blocked", "No model is in use yet")
+    )
+    assert voice.titles() == ["No model is in use yet", "Time taken: 30s"]
 
 
 @pytest.mark.spec("PRJ-19")

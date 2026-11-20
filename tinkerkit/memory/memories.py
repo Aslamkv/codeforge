@@ -658,6 +658,8 @@ def show_memories(page=1):
                 say.item(memory_line(memory))
         if page < pages:
             say.info(next_page_line(page, pages, f"memory {page + 1}"), "👉")
+    elif Home.store().items(Memories.MEMORIES):
+        say.info("No memory is kept now: all of them are retired.", "📭")
     else:
         say.info("Nothing remembered yet: a dream makes them from what you do.", "📭")
     say.info(memory_state(), "📊")

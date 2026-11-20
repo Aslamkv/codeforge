@@ -874,8 +874,8 @@ def test_reflect_runs_rounds_and_logs_each_thought_and_kept_question(home_store,
     ]
     assert dream_events() == [
         {"step": "reflect", "change": "question", "id": pending[0]["id"], "gist": work["text"]},
-        {"step": "reflect", "change": "question", "id": pending[1]["id"], "gist": tone["text"]},
         {"step": "reflect", "change": "thought", "id": "", "gist": "Their work is unknown."},
+        {"step": "reflect", "change": "question", "id": pending[1]["id"], "gist": tone["text"]},
         {"step": "reflect", "change": "thought", "id": "", "gist": "I know enough."},
     ]
     assert reflecting.state["thoughts"] == ["They write Rust.", "Their work is unknown.", "I know enough."]
@@ -930,6 +930,33 @@ def test_reflect_logs_no_note_event_for_a_note_alike_to_a_kept_one(home_store, m
     reflecting.reflect(NOW)
     assert dream_events() == []
     assert [note["text"] for note in Notes.listed()] == ["I miss the file listings"]
+
+
+@pytest.mark.spec("DRM-7", "REF-2")
+def test_reflect_logs_each_round_before_the_next_round_is_asked(home_store, monkeypatch):
+    replies = iter(
+        [
+            {
+                "thought": "Their work is unknown.",
+                "add": [],
+                "questions": [],
+                "notes": ["I miss file listings"],
+                "done": False,
+            },
+            {"thought": "I know enough.", "add": [], "questions": [], "done": True},
+        ]
+    )
+    seen_when_asked = []
+
+    def answered(messages):
+        seen_when_asked.append([event["gist"] for event in dream_events()])
+        return json.dumps(next(replies))
+
+    quick_model_replying(monkeypatch, answered)
+    reflecting = dream()
+    reflecting.state = new_dream_state()
+    reflecting.reflect(NOW)
+    assert seen_when_asked == [[], ["Their work is unknown.", "I miss file listings"]]
 
 
 def new_dream_state():
@@ -1094,15 +1121,17 @@ def test_run_without_a_quick_model_does_nothing(home_store, monkeypatch):
 
 @pytest.mark.spec("DRM-2", "PRJ-15")
 def test_run_gives_its_end(home_store, monkeypatch):
+    monkeypatch.setattr(Models, "quick", staticmethod(lambda: "quick"))
     Home.store().put("dream", "state", {"done": list(Dream.STEPS), "changed": [], "counts": {}, "last": ""})
     ended = dream().run(NOW)
     assert (ended["status"], ended["headline"]) == ("done", "Dreamt")
 
 
 @pytest.mark.spec("DRM-2", "PRJ-15")
-def test_run_without_a_quick_model_still_gives_its_end(home_store, monkeypatch):
+def test_run_without_a_quick_model_ends_saying_no_model_is_in_use(home_store, monkeypatch):
     monkeypatch.setattr(Models, "quick", staticmethod(lambda: None))
-    assert dream().run(NOW)["headline"] == "Dreamt"
+    headline = dream().run(NOW)["headline"]
+    assert "No model is in use yet" in headline and "`tinker model NAME` picks one" in headline
 
 
 LONG_AGO = datetime.datetime(2026, 8, 1, 9, 0, 0)
