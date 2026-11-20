@@ -11,6 +11,8 @@ from ..settings import (
     EPISODE_FOUND_CHARS,
     EPISODE_GIST_CHARS,
     EPISODES_KEPT_BYTES,
+    NOTE_SAME_WORDS,
+    NOTES_KEPT_BYTES,
     QUESTION_SAME_MEANING,
     RECALL_MEANING,
     RECALL_SHOWN,
@@ -111,6 +113,31 @@ class Scratchpad:
                 return
             Home.store().delete(cls.EPISODES, oldest["id"])
             size -= len(json.dumps(oldest))
+
+
+class Notes:
+    KEY = "notes"
+
+    @classmethod
+    def keep(cls, text, now=None):
+        text = text.strip()
+        if not text:
+            return None
+        note = {"at": stamp(now), "text": text}
+        kept = cls.listed()
+        unalike = [older for older in kept if similarity(older["text"], text) < NOTE_SAME_WORDS]
+        Home.store().put(DREAM, cls.KEY, within_budget([note, *unalike]))
+        return note if len(unalike) == len(kept) else None
+
+    @classmethod
+    def listed(cls):
+        return Home.store().get(DREAM, cls.KEY) or []
+
+
+def within_budget(notes):
+    while len(notes) > 1 and len(json.dumps(notes)) > NOTES_KEPT_BYTES:
+        notes = notes[:-1]
+    return notes
 
 
 class Memories:
@@ -544,8 +571,12 @@ def with_merged(traits, merged_ids, merged_id):
 
 
 def trait_line(trait):
+    return f"- {trait_said(trait)}"
+
+
+def trait_said(trait):
     said = trait["gist"] or trait["do"]
-    return f"- {trait['when']}: {said}" if trait["when"] else f"- {said}"
+    return f"{trait['when']}: {said}" if trait["when"] else said
 
 
 def within_room(lines, room):

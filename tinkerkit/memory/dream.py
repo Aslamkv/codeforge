@@ -31,6 +31,7 @@ from .housekeeping import Housekeeping
 from .memories import (
     DREAM,
     Memories,
+    Notes,
     Questions,
     Scratchpad,
     Traits,
@@ -39,13 +40,16 @@ from .memories import (
     likeness_text,
     recall_text,
     stamp,
+    trait_said,
 )
 from .reflection import (
     Reflection,
     asked,
     cited_only,
     listed,
+    own_traits,
     said,
+    self_facts,
     shown,
     shown_memory,
     trait_added,
@@ -356,6 +360,12 @@ class Dream:
         for done in reflection.run(now):
             if done["thought"]:
                 self.recorded("reflect", "thought", {"id": "", "gist": done["thought"]})
+            for retired in done["retired"]:
+                self.recorded("reflect", "retire", {"id": retired["id"], "gist": retired["why"]})
+            if done["learn"]:
+                self.recorded("reflect", "learn", {"id": "", "gist": done["learn"]})
+            for kept in done["notes"]:
+                self.recorded("reflect", "note", {"id": "", "gist": kept})
         self.state["thoughts"] = (self.state["thoughts"] + reflection.thoughts)[-REFLECT_THOUGHTS:]
 
     def compact(self, now=None):
@@ -656,6 +666,48 @@ def show_dream():
         say.item(dream_job())
 
 
+def show_self():
+    with say.part("Myself", "🪞"):
+        for line in measured_lines(self_facts()) or ["Nothing measured yet"]:
+            say.item(line)
+    with say.part("Notes", "📝"):
+        for note in Notes.listed() or [{"text": "No notes yet"}]:
+            say.item(note["text"])
+    with say.part("Traits of my own", "🧭"):
+        for line in own_trait_lines() or ["No traits of my own yet"]:
+            say.item(line)
+
+
+def measured_lines(facts):
+    return [*route_lines(facts), *failure_lines(facts["failed"]), *build_lines(facts["builds done"])]
+
+
+def route_lines(facts):
+    used = [
+        f"{counted(facts['routes living'], 'route')} I use, {facts['routes confirmed']} you confirmed, "
+        f"used {counted(facts['route uses'], 'time')}"
+    ]
+    turned_down = [f"{counted(facts['routes turned down'], 'route')} you turned down"]
+    return used * bool(facts["routes living"]) + turned_down * bool(facts["routes turned down"])
+
+
+def failure_lines(failed):
+    return [
+        f"{count['failed']} of {counted(count['all'], kind)} went wrong"
+        for kind, count in failed.items()
+        if count["all"]
+    ]
+
+
+def build_lines(builds):
+    return [f"{builds['done']} of {counted(builds['all'], 'build')} done"] * bool(builds["all"])
+
+
+def own_trait_lines():
+    own = own_traits(Traits().all(), "tinker")
+    return [trait_said(trait) for trait in own if trait["status"] == "confirmed"]
+
+
 def waiting(number, one):
     return f"{counted(number, one)} {'waits' if number == 1 else 'wait'}"
 
@@ -795,6 +847,8 @@ class Mind(Subsystem):
             return serve_dream_graph()
         if words == ["graph"]:
             return show_memory_graph()
+        if words == ["self"]:
+            return show_self()
         if words != ["run"]:
             return show_dream()
         self.tracked(

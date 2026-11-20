@@ -1017,7 +1017,7 @@ def test_knowledge_refuses_words_it_cannot_read(home_store, capsys):
         assert "tinker knowledge NAME [KIND] [PAGE]" in capsys.readouterr().err
 
 
-@pytest.mark.spec("TNK-1", "REM-7", "DRM-8")
+@pytest.mark.spec("TNK-1", "REM-7", "DRM-8", "REF-7")
 def test_memory_and_dream_words_go_to_the_mind_with_the_persons_yes(home_store, monkeypatch):
     seen = []
 
@@ -1031,12 +1031,13 @@ def test_memory_and_dream_words_go_to_the_mind_with_the_persons_yes(home_store, 
             seen.append((self.yes, words, type(voice).__name__))
 
     monkeypatch.setattr(tinker, "Mind", HeardMind)
-    for words in (["memory"], ["memory", "forget", "a1b2c3", "--yes"], ["dream", "run"]):
+    for words in (["memory"], ["memory", "forget", "a1b2c3", "--yes"], ["dream", "run"], ["dream", "self"]):
         Commands(parse(*words)).run()
     assert seen == [
         (False, ["memory"], "TerminalVoice"),
         (True, ["memory", "forget", "a1b2c3"], "TerminalVoice"),
         (False, ["dream", "run"], "TerminalVoice"),
+        (False, ["dream", "self"], "TerminalVoice"),
     ]
 
 
@@ -1057,12 +1058,12 @@ def test_memory_refuses_words_it_cannot_read(home_store, capsys):
         assert "| traits | routes | graph" in capsys.readouterr().err
 
 
-@pytest.mark.spec("DRM-8")
+@pytest.mark.spec("DRM-8", "REF-7")
 def test_dream_refuses_words_it_cannot_read(home_store, capsys):
-    for wrong in (["now"], ["run", "now"], ["status", "run"], ["graph", "now"]):
+    for wrong in (["now"], ["run", "now"], ["status", "run"], ["graph", "now"], ["self", "now"]):
         with pytest.raises(SystemExit):
             parse("dream", *wrong)
-        assert "tinker dream [status] | run | graph" in capsys.readouterr().err
+        assert "tinker dream [status] | self | run | graph" in capsys.readouterr().err
 
 
 @pytest.mark.spec("SKL-8", "CMD-1")

@@ -541,19 +541,21 @@ COMMANDS = [
     Command(
         "dream",
         "Learn",
-        "dream [status] | run",
-        "when Tinker last dreamt, and dream now",
+        "dream [status] | self | run",
+        "when Tinker last dreamt, what it knows of itself, and dream now",
         "See how Tinker learns from what you do: dream (or dream status) says when the last dream was, how many "
-        "changes each step made, how many episodes wait, and whether a dream is queued or running; dream run "
+        "changes each step made, how many episodes wait, and whether a dream is queued or running; dream self "
+        "shows what Tinker measured about itself, the notes it keeps and its own confirmed traits; dream run "
         "dreams now, turning fresh episodes into memories and learning traits.",
         kind="glance",
         actions=[Action("job", "run")],
         chat=True,
         words=True,
-        arguments=[Argument("words", "*", "[status] | run", "status (the default) or run")],
+        arguments=[Argument("words", "*", "[status] | self | run", "status (the default), self or run")],
         example="dream run",
         rows=[
             ("dream [status]", "the last dream, its changes, the waiting episodes and any queued dream"),
+            ("dream self", "what Tinker measured about itself, its kept notes and its own confirmed traits"),
             ("dream run", "dream now: consolidate fresh episodes, revise memories and learn traits"),
         ],
     ),

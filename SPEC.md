@@ -181,7 +181,7 @@ the last column:
 | `traits` | who the person is and who Tinker is for them (**REM-5**) | |
 | `routes` | which message pattern means which command line, as learned from the person (**RTE-1**) | |
 | `questions` | the questions that wait for the person, each with the thought behind it and Tinker's guess at the answer, and those answered or skipped (**REM-15**) | |
-| `dream` | the dream's last state (`state`), with the reflection's last thoughts (**DRM-11**) | |
+| `dream` | the dream's last state (`state`), with the reflection's last thoughts (**DRM-11**), and the notes Tinker keeps about itself (`notes`, **REF-6**) | |
 | log `dream events` | every change a dream made (**DRM-7**) | |
 
 Jobs, readings, instructions and the chat history are numbered lists (`Numbered`, **SET-11**). `#N` names an entry. A list
@@ -401,7 +401,7 @@ The home and its database, the settings, numbered lists, and the one way to dele
   a chat only says to run it there, **CNV-9**). An action whose kind differs from its command's is an `Action`
   of that command, with its own kind: `read list`, `read show`, `read rename` (`glance`), `read #N learn` (`job`),
   `read forget` (`glance`, deletes), `exercise status`, `channel add`,
-  `channel remove`, `channel start`, `model calibrate NAME`, `model recipe` (`glance`), `model recipe all`, `dream run` (`job`; `dream`, `dream status` and
+  `channel remove`, `channel start`, `model calibrate NAME`, `model recipe` (`glance`), `model recipe all`, `dream run` (`job`; `dream`, `dream status`, `dream self` and
   `dream graph` are `glance`), `skill list` (`glance`), `skill forget` (`glance`, deletes),
   and `learn` of a command of
   the person's (**CLI-1**). `kind_of(argv)` gives the kind of what the words ask for, and `deletes(argv)`
@@ -464,8 +464,9 @@ goes to the front, so the person is always answered first.
   `/queue list`) lists the queue in order, its head first; `queue stop #N` is `stop #N`; `queue stop all` stops
   the job that runs and takes every job out. Inside an instruction, `/stop` and `/resume` act on its run instead
   (**INS-6**).
-- **JOB-8** The home keeps one queue (`Queue`): an ordered list of job numbers, and only its head runs. A job is added
-  at the front (whatever the person asks for). The head a new front pushes back is sent `JOB_STOP_SIGNAL`: it saves
+- **JOB-8** The home keeps one queue (`Queue`): an ordered list of job numbers, and only its head runs. A job the person
+  asks for (a dream they run included) is added at the front; a job Tinker queues itself (an idle dream, a
+  calibration, a reflection's learn) is added at the back, pushing nothing back. The head a new front pushes back is sent `JOB_STOP_SIGNAL`: it saves
   itself, its process ends, and it stays queued, second. A job leaves the queue when it ends or is stopped. No rule
   refuses a job because another runs: not the conversation's task, nor a second exercise.
 - **JOB-9** A live Tinker is an event loop: it takes requests, starts long work as a job and goes back to
@@ -1910,28 +1911,49 @@ model.
 
 ## memory.reflection (REF)
 
-Tinker thinks about who the person is and who it is for them, from what the dreams kept. Each thought leads to a
-candidate trait with its question, or to an open question, and the questions wait for the person (**INT**). Every
-dream reflects at its end (**DRM-11**), and the dialogue reflects live when nothing waits (**INT-2**).
+Tinker thinks about who the person is, who it is for them, and where it falls short. The code finds the gaps
+(what went wrong, what the person turned down) and each round thinks about them: a thought leads to a candidate
+trait with its question, an open question, a note Tinker keeps about itself, a route retired or a topic to learn.
+Every dream reflects at its end (**DRM-11**), and the dialogue reflects live when nothing waits (**INT-2**).
 
 - **REF-1** A round is one call of `REFLECT_SYSTEM` given, as JSON: `person` and `tinker`, each with the confirmed
   traits, the candidates, the pending questions (text, thought, expected), the last `REFLECT_ANSWERED` (20)
   answered questions (text, answer), never to be asked again in other words, and the traits the person retired
   with why; `evidence`, the gists of the last `REFLECT_EPISODES` (20) dreamt episodes (id, gist) and the living `person`
-  memories; `thoughts`, this loop's so far and the last `REFLECT_THOUGHTS` (10) kept from earlier loops; and
-  `waiting`, how many questions are pending. It reads `{thought, add: [{about, when, do, sources, question, thought,
-  expected}], questions: [{about, text, thought, expected}], done}`: each add is a candidate (**REM-14**) with its
-  `confirm` question, each question an `open` one (**REM-15**), both with the thought that led to it and `expected`,
-  Tinker's guess at the answer. The round's `thought` joins the loop's.
-- **REF-2** `Reflection.run()` makes rounds until one says `done`, or keeps nothing new (**REM-15**), or
-  `REFLECT_ROUNDS` (20) rounds are made. It gives back the loop's thoughts, its caller keeping the newest
-  `REFLECT_THOUGHTS` for the next loop, and what each round kept.
+  memories; `gaps` (**REF-4**); `self`, the measured facts and kept notes (**REF-5**); `thoughts`, this loop's so
+  far and the last `REFLECT_THOUGHTS` (10) kept from earlier loops; and `waiting`, how many questions are pending.
+  Each part is there only when it holds something. It reads `{thought, add: [{about, when, do, sources, question,
+  thought, expected}], questions: [{about, text, thought, expected}], notes: [text], retire: [{id, why}], learn,
+  done}`: each add is a candidate (**REM-14**) with its `confirm` question, each question an `open` one
+  (**REM-15**), both with the thought that led to it and `expected`, Tinker's guess at the answer; each note is kept
+  (**REF-6**); each retire is a `retire` delta (**RTE-5**) of a living route named in `gaps`, any other id dropped;
+  `learn` is a topic queued as `learn TOPIC` (**LRN**) at the queue's back (**JOB-8**), at most one per loop, the later ones dropped. The round's
+  `thought` joins the loop's.
+- **REF-2** `Reflection.run()` makes rounds until one says `done`, or keeps nothing new (no question, note,
+  retire or learn), or `REFLECT_ROUNDS` (20) rounds are made. It gives back the loop's thoughts, its caller keeping
+  the newest `REFLECT_THOUGHTS` for the next loop, and what each round kept.
 - **REF-3** The prompt holds `TINKER_PURPOSE`, what Tinker is for in the words of [The idea](#the-idea); says a trait
   is lasting, never a passing state (as **DRM-6**); tells the model `REFLECT_WAITING` (12) questions waiting is
   plenty, as a guideline and never a block; that a question like one waiting, or about a trait the person retired,
   is not to ask again, nor one that an asked question or a known trait already covers, even in other words; asks for the `thought` in two or three sentences, so a reply never spends its budget on
   a thought that goes on; and says each question's text, thought and expected are shown to the person, in plain
-  words that name no id.
+  words that name no id. Only when `gaps` is given does it say what a note, a retire and a learn are for: a note is
+  one short lasting observation of Tinker about itself, a retire is for a route that keeps going wrong, and a learn
+  is for a topic Tinker lacked.
+- **REF-4** The gaps are found by code, with no model, newest first, at most `REFLECT_GAPS` (10) of each kind:
+  `turned down`, the routes the person retired by no, amend or correction (**RTE-7**; id, pattern, line, why);
+  `failing`, each living route with a failed chat episode (id, pattern, line, uses, failed count); and `failed`,
+  the episodes that went wrong (id, gist): a chat whose `status` is `failed`, an instruction whose `code` is not 0,
+  a build whose `status` is `blocked`. Both a dreamt episode and a fresh one count.
+- **REF-5** The self-model's measured facts are counted by code each time they are needed, never stored: routes
+  living and confirmed, their uses, and those the person turned down; failed episodes by kind (chat,
+  instruction, build) out of all of that kind; builds done out of all builds.
+- **REF-6** A note is kept in `dream`/`notes` as `{at, text}`, newest first. A note alike in words (**KNW-11**, at
+  least `NOTE_SAME_WORDS`, 0.6) to a kept one replaces it, but is nothing new: no dream event, and it does not count as kept for **REF-2**. The notes are kept within `NOTES_KEPT_BYTES` (20 000,
+  the length of their JSON): over it the oldest are dropped. Each newly kept note is a dream event (**DRM-7**)
+  of step `reflect`.
+- **REF-7** `tinker dream self` (`/dream self`, a glance) shows the measured facts (**REF-5**), the kept notes
+  newest first, and the `tinker` confirmed traits, each part in plain words, or that there is nothing yet.
 
 ## memory.dream (DRM)
 
@@ -2000,8 +2022,9 @@ the person (**INT**).
   gist, and reads `{gists: {id: gist}}`: the shortest wording that keeps the meaning, kept only when shorter than its
   `do`. Nothing is asked.
 - **DRM-11** Reflect runs a reflection loop (**REF-2**) with the `thoughts` kept in `dream`/`state`, and keeps the
-  newest `REFLECT_THOUGHTS` back there; each round's thought is a dream event (**DRM-7**) of step `reflect`. Nothing
-  is sent to the person: the questions wait for `interact` (**INT-1**).
+  newest `REFLECT_THOUGHTS` back there; each round's thought, and each route it retired and topic it queued, is a
+  dream event (**DRM-7**) of step `reflect`. Nothing is sent to the person: the questions wait for `interact`
+  (**INT-1**), and a queued learn runs as any job.
 - **DRM-12** Merge traits joins similar living traits (as **GRF-3**, on `when` and `do`) of a group where one has a
   history event since the last dream (teaching and the interview change traits too): `DREAM_MERGE_TRAITS_SYSTEM`
   (given the traits newest first, and told so) answers `{merge: [{ids, when, do}]}`, the newer wording winning where they disagree, each applied as a `merge`

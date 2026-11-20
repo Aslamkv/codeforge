@@ -86,6 +86,7 @@ def test_the_kind_of_a_command_and_of_its_actions_comes_from_the_table():
         (["model", "recipe", "all"], "job"),
         (["dream"], "glance"),
         (["dream", "status"], "glance"),
+        (["dream", "self"], "glance"),
         (["dream", "run"], "job"),
         (["skill", "learn", "thumbs"], "job"),
         (["skill", "list"], "glance"),

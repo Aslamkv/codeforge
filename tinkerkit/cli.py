@@ -563,9 +563,9 @@ class Cli:
 
     @staticmethod
     def dream_words(words, parser):
-        if words in ([], ["status"], ["run"], ["graph"]):
+        if words in ([], ["status"], ["self"], ["run"], ["graph"]):
             return words
-        parser.error("use tinker dream [status] | run | graph")
+        parser.error("use tinker dream [status] | self | run | graph")
 
     @staticmethod
     def skill_words(words, parser):

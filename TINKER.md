@@ -586,7 +586,10 @@ retired memories, traits and routes shrink to a stub that still keeps a question
 oldest dreamt episodes are deleted.
 A dream never decides a trait on its own: each one waits as a question for you. At the end of every dream Tinker
 reflects on who you are and who it should be for you, from what it kept, and each thought it keeps becomes a
-question with its guess at your answer. A dream is a job, so it never runs over a chat or a build:
+question with its guess at your answer. It also reflects on itself, starting from what went wrong: readings
+you turned down or that keep missing, failed chats, instructions and builds. It keeps short notes about itself
+(a note like one it has replaces it), retires a reading that keeps failing, and may queue one `learn` for a
+topic it found it lacks. A dream is a job, so it never runs over a chat or a build:
 
 ```sh
 tinker memory                # the memories, newest first, and when the last dream was
@@ -597,6 +600,7 @@ tinker memory routes         # which messages Tinker has learned mean which comm
 tinker memory forget r4      # stop reading messages that way (retire route r4)
 tinker dream                 # the last dream, what it changed, and what waits
 tinker dream run             # dream now
+tinker dream self            # what Tinker knows about itself: hit rates, failures, builds, notes, traits
 tinker dream graph           # watch the episodes and memories change, live in the browser
 ```
 
@@ -623,7 +627,8 @@ Everything that takes a while is a job: a task (and `restart`, `confirm`, `amend
 
 Jobs wait in one queue, and only the first runs. Start another job, or chat with Tinker, and it goes to the front:
 the running one saves itself and waits second, and you are answered at once. When a job ends, the next goes on
-where it was. A job runs on its own, its output kept in the home's `jobs/` folder, so Ctrl-C on a job command, or
+where it was. What Tinker starts by itself (an idle dream, a calibration, a dream's `learn`) joins the back
+instead, behind your jobs, and pushes nothing back. A job runs on its own, its output kept in the home's `jobs/` folder, so Ctrl-C on a job command, or
 quitting a chat, leaves it running; only `tinker stop` stops it. The next job starts while a Tinker is open (a
 chat, or a job command in a terminal, which ends once its own job leaves the queue), and again whenever Tinker
 starts.

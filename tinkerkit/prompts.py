@@ -1267,6 +1267,7 @@ Reply with ONLY JSON: {"claims":[{"claim":1,"verdict":"holds","why":"one short s
         "with the thought behind each and the answer expected, the questions the person already answered, with "
         "the answers, and the traits the person retired with why; "
         "the evidence, the gists of recent episodes and the memories about the person, each with its id; "
+        "when given, self, facts measured about Tinker and the notes it kept about itself; "
         "your thoughts so far; and how many questions are waiting. A trait has when, the situation it holds "
         "in, empty when it always holds, and do, the trait as said. A trait is lasting (work, goals, likes, "
         "ways of working), never a passing state (the folder, the time, one command's output). Think about "
@@ -1290,6 +1291,16 @@ Reply with ONLY JSON: {"claims":[{"claim":1,"verdict":"holds","why":"one short s
         ' "done":false}\n'
         "Every add cites the ids it rests on; use only the ids you are given. Leave a list empty when nothing "
         "fits. Say done true when nothing is left worth adding or asking."
+    )
+
+    REFLECT_GAPS_GUIDE = (
+        "\nYou also get gaps: the routes the person turned down, the routes whose chats failed, and the "
+        "episodes that went wrong. Your reply may also hold:\n"
+        '{"notes":["one short lasting observation of Tinker about itself"],\n'
+        ' "retire":[{"id":"a route id from gaps","why":"why it keeps going wrong"}],\n'
+        ' "learn":"a topic Tinker lacked, or empty"}\n'
+        "Retire only a route that keeps going wrong, using only the route ids in gaps. Learn only a topic "
+        "Tinker lacked."
     )
 
     DREAM_MERGE_TRAITS_SYSTEM = (

@@ -8,6 +8,7 @@ from tinkerkit.chat.shell import Checked
 from tinkerkit.memory.memories import (
     STARTER_TOOLS,
     Memories,
+    Notes,
     Questions,
     Scratchpad,
     Traits,
@@ -143,6 +144,54 @@ def test_prune_never_counts_or_deletes_fresh_episodes(home_store, monkeypatch):
     Scratchpad.prune()
 
     assert sorted(home_store.items("episodes")) == ["e1", "e2"]
+
+
+NOTES_BUDGET = "tinkerkit.memory.memories.NOTES_KEPT_BYTES"
+
+
+@pytest.mark.spec("REF-6")
+def test_a_kept_note_has_its_time_and_the_notes_list_newest_first(home_store):
+    first = Notes.keep("I often miss the disk tools", NOW)
+    Notes.keep("Weather questions go unanswered", NOW + datetime.timedelta(hours=1))
+
+    assert first == {"at": "2026-11-11T12:00:00", "text": "I often miss the disk tools"}
+    assert [note["text"] for note in Notes.listed()] == [
+        "Weather questions go unanswered",
+        "I often miss the disk tools",
+    ]
+    assert home_store.get("dream", "notes") == Notes.listed()
+
+
+@pytest.mark.spec("REF-6")
+def test_a_blank_note_keeps_nothing(home_store):
+    assert Notes.keep("   ", NOW) is None
+    assert Notes.listed() == []
+
+
+@pytest.mark.spec("REF-6")
+def test_a_note_alike_in_words_replaces_the_older_one_at_the_front(home_store):
+    Notes.keep("I often miss the disk tools", NOW)
+    Notes.keep("Weather questions go unanswered", NOW)
+    alike = Notes.keep("I often miss the disk tool", NOW + datetime.timedelta(hours=1))
+
+    assert alike is None
+    assert [note["text"] for note in Notes.listed()] == [
+        "I often miss the disk tool",
+        "Weather questions go unanswered",
+    ]
+
+
+@pytest.mark.spec("REF-6")
+def test_notes_over_the_kept_space_drop_the_oldest(home_store, monkeypatch):
+    texts = ["alpha beta gamma", "weather is unknown", "files are listed by size"]
+    for text in texts:
+        Notes.keep(text, NOW)
+    kept = Notes.listed()[:2]
+    monkeypatch.setattr(NOTES_BUDGET, len(json.dumps(kept)))
+
+    Notes.keep("files are listed by size", NOW)
+
+    assert [note["text"] for note in Notes.listed()] == ["files are listed by size", "weather is unknown"]
 
 
 @pytest.mark.spec("DRM-9")

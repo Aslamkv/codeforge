@@ -1,5 +1,6 @@
 import json
 
+from ..jobs import Runner
 from ..logger import note
 from ..model.models import Models, OllamaError
 from ..prompts import Prompts, Reply
@@ -8,12 +9,16 @@ from ..settings import (
     DREAM_REPLY_TOKENS,
     REFLECT_ANSWERED,
     REFLECT_EPISODES,
+    REFLECT_GAPS,
     REFLECT_ROUNDS,
     REFLECT_THOUGHTS,
     Home,
 )
-from .memories import TRAIT_ABOUTS, Memories, Questions, Scratchpad, Traits
+from .memories import TRAIT_ABOUTS, Memories, Notes, Questions, Scratchpad, Traits
+from .routes import Routes
 
+REFLECTED_WHY = "reflected: "
+NOT_TURNED_DOWN_WHYS = ("forgotten", "replaced by ", REFLECTED_WHY)
 SHOWN_MEMORY_KEYS = ("id", "kind", "gist", "text", "strength", "recalled")
 SIDE_TRAIT_KEYS = ("id", "when", "do")
 PENDING_KEYS = ("text", "thought", "expected")
@@ -24,6 +29,7 @@ class Reflection:
         self.earlier = list(thoughts)[-REFLECT_THOUGHTS:]
         self.thoughts = []
         self.logged = logged
+        self.learned = False
 
     def run(self, now=None):
         rounds = []
@@ -32,13 +38,14 @@ class Reflection:
             if kept is None:
                 break
             rounds.append(kept)
-            if kept["done"] or not kept["kept"]:
+            if kept["done"] or not kept_anything(kept):
                 break
         return rounds
 
     def round(self, now=None):
-        seen = evidence()
-        reply = asked(Prompts.REFLECT_SYSTEM, reflection_text(seen, self.earlier + self.thoughts))
+        seen, shown_gaps = evidence(), holding({"gaps": gaps()}).get("gaps", {})
+        system = Prompts.REFLECT_SYSTEM + (Prompts.REFLECT_GAPS_GUIDE if shown_gaps else "")
+        reply = asked(system, reflection_text(seen, shown_gaps, self.earlier + self.thoughts))
         if not isinstance(reply, dict):
             return None
         thought = said(reply, "thought")
@@ -48,7 +55,52 @@ class Reflection:
         confirms = [trait_added(item, given, now, self.logged) for item in listed(reply.get("add"))]
         opens = [question_kept(item, now, self.logged) for item in listed(reply.get("questions"))]
         kept = [question for question in confirms + opens if question]
-        return {"thought": thought, "kept": kept, "done": reply.get("done") is True}
+        return {
+            "thought": thought,
+            "kept": kept,
+            "notes": notes_kept(reply.get("notes"), now),
+            "retired": routes_retired(listed(reply.get("retire")), shown_gaps, now),
+            "learn": self.learn_queued(said(reply, "learn").strip()),
+            "done": reply.get("done") is True,
+        }
+
+    def learn_queued(self, topic):
+        if not topic or self.learned:
+            return ""
+        Runner.queue_idle_job(["learn", topic])
+        self.learned = True
+        return topic
+
+
+def kept_anything(kept):
+    return any(kept[key] for key in ("kept", "notes", "retired", "learn"))
+
+
+def notes_kept(notes, now):
+    texts = [note for note in notes if isinstance(note, str)] if isinstance(notes, list) else []
+    return [kept["text"] for kept in (Notes.keep(text, now) for text in texts) if kept]
+
+
+def routes_retired(retires, shown_gaps, now):
+    named = {route["id"] for kind in ("turned down", "failing") for route in shown_gaps.get(kind, [])}
+    wanted = [{"id": item["id"], "why": said(item, "why")} for item in retires if item.get("id") in named]
+    retired = {
+        route["id"]
+        for route in Routes().apply(
+            [{"op": "retire", "id": item["id"], "why": REFLECTED_WHY + item["why"]} for item in wanted], now
+        )
+    }
+    return [item for item in wanted if item["id"] in retired]
+
+
+def holding(parts):
+    return {name: part for name, part in parts.items() if holds_something(part)}
+
+
+def holds_something(value):
+    if isinstance(value, dict):
+        return any(holds_something(part) for part in value.values())
+    return bool(value)
 
 
 def evidence():
@@ -61,14 +113,131 @@ def evidence():
     }
 
 
-def reflection_text(seen, thoughts):
+class ChatEpisode:
+    name, shape, text = "chat", "message", "message"
+
+    @staticmethod
+    def failed(episode):
+        return episode.get("status") == "failed"
+
+
+class InstructionEpisode:
+    name, shape, text = "instruction", "code", "request"
+
+    @staticmethod
+    def failed(episode):
+        return episode["code"] != 0
+
+
+class BuildEpisode:
+    name, shape, text = "build", "task", "task"
+
+    @staticmethod
+    def failed(episode):
+        return episode.get("status") == "blocked"
+
+
+EPISODE_KINDS = (ChatEpisode, InstructionEpisode, BuildEpisode)
+
+
+def kind_of(episode):
+    return next((kind for kind in EPISODE_KINDS if kind.shape in episode), None)
+
+
+def went_wrong(episode):
+    kind = kind_of(episode)
+    return kind is not None and kind.failed(episode)
+
+
+def gaps():
+    episodes = newest_episodes()
+    routes = newest_routes()
+    failed = [episode for episode in episodes if went_wrong(episode)]
+    return {
+        "turned down": [turned_down_shown(route) for route in routes if turned_down(route)][:REFLECT_GAPS],
+        "failing": failing_routes(routes, failed)[:REFLECT_GAPS],
+        "failed": [failed_shown(episode) for episode in failed][:REFLECT_GAPS],
+    }
+
+
+def newest_episodes():
+    episodes = Home.store().items(Scratchpad.EPISODES).values()
+    return sorted(episodes, key=lambda episode: episode["time"], reverse=True)
+
+
+def newest_routes():
+    return sorted(Routes().all(), key=lambda route: route["history"][-1]["at"], reverse=True)
+
+
+def turned_down(route):
+    return route["status"] == "retired" and not route["retired"].startswith(NOT_TURNED_DOWN_WHYS)
+
+
+def turned_down_shown(route):
+    return {"id": route["id"], "pattern": route["pattern"], "line": route["line"], "why": route["retired"]}
+
+
+def failing_routes(routes, failed):
+    shown = [failing_shown(route, failed) for route in routes if route["status"] != "retired"]
+    return [route for route in shown if route["failed"]]
+
+
+def failing_shown(route, failed):
+    count = sum(
+        1 for episode in failed if kind_of(episode) is ChatEpisode and episode.get("route") == route["id"]
+    )
+    return {
+        "id": route["id"],
+        "pattern": route["pattern"],
+        "line": route["line"],
+        "uses": route["uses"],
+        "failed": count,
+    }
+
+
+def failed_shown(episode):
+    return {"id": episode["id"], "gist": episode.get("gist") or episode.get(kind_of(episode).text, "")}
+
+
+def self_facts():
+    routes = Routes().all()
+    living = [route for route in routes if route["status"] != "retired"]
+    episodes = list(Home.store().items(Scratchpad.EPISODES).values())
+    builds = of_kind(episodes, BuildEpisode)
+    return {
+        "routes living": len(living),
+        "routes confirmed": sum(1 for route in living if route["status"] == "confirmed"),
+        "route uses": sum(route["uses"] for route in living),
+        "routes turned down": sum(1 for route in routes if turned_down(route)),
+        "failed": {kind.name: failed_count(of_kind(episodes, kind)) for kind in EPISODE_KINDS},
+        "builds done": {
+            "done": sum(1 for build in builds if build.get("status") == "done"),
+            "all": len(builds),
+        },
+    }
+
+
+def of_kind(episodes, kind):
+    return [episode for episode in episodes if kind_of(episode) is kind]
+
+
+def failed_count(episodes):
+    return {"failed": sum(1 for episode in episodes if went_wrong(episode)), "all": len(episodes)}
+
+
+def reflection_text(seen, shown_gaps, thoughts):
     traits, pending = Traits().all(), Questions().pending()
     answered = Questions().with_status("answered")
     sides = {about: side(about, traits, pending, answered) for about in TRAIT_ABOUTS}
-    return json.dumps(
-        sides | {"evidence": seen, "thoughts": thoughts, "waiting": len(pending)},
-        ensure_ascii=False,
+    measured = holding(
+        {
+            "gaps": shown_gaps,
+            "self": self_facts() | {"notes": Notes.listed()},
+            "thoughts": thoughts,
+            "waiting": len(pending),
+        }
     )
+    return json.dumps(sides | {"evidence": seen} | measured, ensure_ascii=False)
 
 
 def side(about, traits, pending, answered):

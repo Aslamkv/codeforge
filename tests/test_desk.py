@@ -935,12 +935,15 @@ def test_memory_forget_asks_first_and_the_other_memory_views_are_glances(desk, m
     assert desk.ran[-1] == ["memory", "forget", "t3"]
 
 
-@pytest.mark.spec("CNV-9", "DRM-8")
+@pytest.mark.spec("CNV-9", "DRM-8", "REF-7")
 def test_dream_status_is_a_glance_in_a_chat(desk, monkeypatch):
     desk, channel, _ = desk
     monkeypatch.setattr(desk, "tinker", lambda words: desk.ran.append(words) or "💤 Dream")
     assert desk.answer(Message("1", "/dream"), channel) == "⚙️ **dream**\n```\n💤 Dream\n```"
     assert desk.ran[-1] == ["dream"]
+    monkeypatch.setattr(desk, "tinker", lambda words: desk.ran.append(words) or "🪞 Myself")
+    assert desk.answer(Message("1", "/dream self"), channel) == "⚙️ **dream self**\n```\n🪞 Myself\n```"
+    assert desk.ran[-1] == ["dream", "self"]
 
 
 @pytest.fixture

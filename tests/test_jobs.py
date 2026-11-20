@@ -1039,6 +1039,19 @@ def test_going_through_an_emptied_queue_starts_the_idle_clock(home_store, runner
     assert len(queued_dreams()) == 1
 
 
+@pytest.mark.spec("JOB-8", "REF-1")
+def test_a_job_tinker_queues_itself_joins_the_back_and_pushes_nothing_back(home_store, told):
+    running = Jobs.save(dict(Jobs.new(["dream", "run"]), state="running", pid=os.getpid()))["number"]
+    Queue.add_front(running)
+    waiting = Jobs.save(dict(Jobs.new(["ask", "why"]), state="queued"))["number"]
+    add_back(waiting)
+    Runner.queue_idle_job(["learn", "rust"])
+    learn = Queue.ordered()[-1]
+    assert Queue.ordered() == [running, waiting, learn]
+    assert JOBS.get(learn)["arguments"] == ["learn", "rust"]
+    assert told == []
+
+
 def run_output(number):
     return (Home.job_folder(number) / "output.log").read_text()
 

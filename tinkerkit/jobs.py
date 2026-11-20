@@ -58,6 +58,11 @@ class Queue:
         Runner.wake.set()
 
     @staticmethod
+    def add_back(number):
+        Queue.place(number, lambda others: others + [number])
+        Runner.wake.set()
+
+    @staticmethod
     def remove(number):
         Queue.place(number, lambda others: others)
 
@@ -129,7 +134,7 @@ class Runner:
 
     @classmethod
     def queue_idle_job(cls, argv):
-        Queue.add_front(Jobs.save(dict(Jobs.new(argv), state="queued", idle=True))["number"])
+        Queue.add_back(Jobs.save(dict(Jobs.new(argv), state="queued", idle=True))["number"])
         cls.idle_since = None
 
     @staticmethod

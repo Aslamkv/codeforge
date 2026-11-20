@@ -15,8 +15,17 @@ from tinkerkit.knowledge.principles import Principle, Principles
 from tinkerkit.memory import dream as dream_module
 from tinkerkit.memory import memories as memory_views
 from tinkerkit.memory import routes as route_views
-from tinkerkit.memory.dream import Dream, LiveGraph, MemoryGraph, Mind, asked, show_dream, show_memory_graph
-from tinkerkit.memory.memories import Memories, Questions, Scratchpad, Traits
+from tinkerkit.memory.dream import (
+    Dream,
+    LiveGraph,
+    MemoryGraph,
+    Mind,
+    asked,
+    show_dream,
+    show_memory_graph,
+    show_self,
+)
+from tinkerkit.memory.memories import Memories, Notes, Questions, Scratchpad, Traits
 from tinkerkit.model.models import Models, OllamaError
 from tinkerkit.prompts import Prompts
 from tinkerkit.ranking import Retriever
@@ -872,6 +881,57 @@ def test_reflect_runs_rounds_and_logs_each_thought_and_kept_question(home_store,
     assert reflecting.state["thoughts"] == ["They write Rust.", "Their work is unknown.", "I know enough."]
 
 
+@pytest.mark.spec("DRM-11", "DRM-7", "REF-6")
+def test_reflect_logs_each_retire_learn_and_note(home_store, monkeypatch):
+    route = route_views.Routes().apply(
+        [{"op": "add", "pattern": "show files", "line": "ls", "source": "chat"}]
+    )[0]
+    Scratchpad.write(
+        {
+            "chat": "telegram:1",
+            "message": "show files",
+            "reply": "",
+            "status": "failed",
+            "route": route["id"],
+        },
+        NOW,
+    )
+    replying(
+        monkeypatch,
+        {
+            "thought": "",
+            "add": [],
+            "questions": [],
+            "notes": ["I miss file listings"],
+            "retire": [{"id": route["id"], "why": "keeps failing"}],
+            "learn": "shell globbing",
+            "done": True,
+        },
+    )
+    reflecting = dream()
+    reflecting.state = new_dream_state()
+    reflecting.reflect(NOW)
+    assert dream_events() == [
+        {"step": "reflect", "change": "retire", "id": route["id"], "gist": "keeps failing"},
+        {"step": "reflect", "change": "learn", "id": "", "gist": "shell globbing"},
+        {"step": "reflect", "change": "note", "id": "", "gist": "I miss file listings"},
+    ]
+
+
+@pytest.mark.spec("DRM-7", "REF-6")
+def test_reflect_logs_no_note_event_for_a_note_alike_to_a_kept_one(home_store, monkeypatch):
+    Notes.keep("I miss file listings", NOW)
+    replying(
+        monkeypatch,
+        {"thought": "", "add": [], "questions": [], "notes": ["I miss the file listings"], "done": True},
+    )
+    reflecting = dream()
+    reflecting.state = new_dream_state()
+    reflecting.reflect(NOW)
+    assert dream_events() == []
+    assert [note["text"] for note in Notes.listed()] == ["I miss the file listings"]
+
+
 def new_dream_state():
     return {
         "done": [],
@@ -1241,6 +1301,50 @@ def test_show_dream_says_one_fresh_episode_waits_and_two_questions_wait(home_sto
     assert "2 questions wait for tinker interact" in out
 
 
+MEASURED_SELF = {
+    "routes living": 12,
+    "routes confirmed": 5,
+    "route uses": 80,
+    "routes turned down": 2,
+    "failed": {
+        "chat": {"failed": 3, "all": 40},
+        "instruction": {"failed": 0, "all": 0},
+        "build": {"failed": 1, "all": 6},
+    },
+    "builds done": {"done": 4, "all": 6},
+}
+
+
+@pytest.mark.spec("REF-5", "REF-7")
+def test_show_self_says_the_measured_facts_the_notes_newest_first_and_tinkers_confirmed_traits(
+    home_store, capsys, monkeypatch
+):
+    monkeypatch.setattr(dream_module, "self_facts", lambda: MEASURED_SELF)
+    Notes.keep("I answer chats about files well", now=EARLIER)
+    Notes.keep("builds of games often stop half way", now=NOW)
+    confirmed_trait("answers in short lines", about="tinker")
+    confirmed_trait("writes Rust daily")
+    show_self()
+    out = capsys.readouterr().out
+    assert "12 routes I use, 5 you confirmed, used 80 times" in out
+    assert "2 routes you turned down" in out
+    assert "3 of 40 chats went wrong" in out and "1 of 6 builds went wrong" in out
+    assert "instruction" not in out
+    assert "4 of 6 builds done" in out
+    assert out.index("builds of games often stop half way") < out.index("I answer chats about files well")
+    assert "answers in short lines" in out and "writes Rust daily" not in out
+    assert "routes living" not in out and "tinker dream" not in out
+
+
+@pytest.mark.spec("REF-7")
+def test_show_self_with_nothing_measured_or_kept_says_there_is_nothing_yet(home_store, capsys):
+    show_self()
+    out = capsys.readouterr().out
+    assert "Nothing measured yet" in out
+    assert "No notes yet" in out
+    assert "No traits of my own yet" in out
+
+
 @pytest.mark.spec("DRM-9")
 def test_the_memory_graph_links_memories_to_their_episodes_and_a_merged_memory_to_its_successor(home_store):
     episode()
@@ -1424,10 +1528,11 @@ def test_mind_handles_the_memory_views_and_gives_forget_the_persons_yes(home_sto
     ]
 
 
-@pytest.mark.spec("TNK-1", "DRM-8", "DRM-9")
+@pytest.mark.spec("TNK-1", "DRM-8", "DRM-9", "REF-7")
 def test_mind_shows_the_dream_and_dream_run_is_a_job_with_the_tracker_phases(home_store, monkeypatch):
     seen = tracked_work(monkeypatch)
     monkeypatch.setattr(dream_module, "show_dream", lambda: seen.append("show_dream"))
+    monkeypatch.setattr(dream_module, "show_self", lambda: seen.append("show_self"))
     monkeypatch.setattr(dream_module.sys.stdout, "isatty", lambda: False)
     monkeypatch.setattr(dream_module, "show_memory_graph", lambda: seen.append("show_memory_graph"))
     monkeypatch.setattr(Retriever, "__init__", lambda retriever, embeddings: None)
@@ -1435,11 +1540,12 @@ def test_mind_shows_the_dream_and_dream_run_is_a_job_with_the_tracker_phases(hom
     monkeypatch.setattr(
         Dream, "run", lambda dream: seen.append(("run", dream.phase("consolidate"))) or "dreamt"
     )
-    for words in ([], ["status"], ["graph"], ["run"]):
+    for words in ([], ["status"], ["self"], ["graph"], ["run"]):
         Mind().handle(["dream", *words], Heard())
     assert seen == [
         "show_dream",
         "show_dream",
+        "show_self",
         "show_memory_graph",
         ("follow", "Dreaming"),
         ("run", "phase consolidate"),

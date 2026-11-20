@@ -14,7 +14,7 @@ import tinkerkit.cli  # noqa: F401
 from tinkerkit import desk, jobs, logger
 from tinkerkit.build.project import Project
 from tinkerkit.chat import reports
-from tinkerkit.jobs import Queue, Runner
+from tinkerkit.jobs import Queue
 from tinkerkit.messages import say
 from tinkerkit.model.models import Model, Models, Ollama
 from tinkerkit.ranking import Likeness
@@ -414,8 +414,7 @@ class FakeSearch:
 
 
 def add_back(number):
-    Queue.place(number, lambda others: others + [number])
-    Runner.wake.set()
+    Queue.add_back(number)
 
 
 def quick_model_replying(monkeypatch, reply):
