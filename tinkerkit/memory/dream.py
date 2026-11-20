@@ -11,6 +11,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from ..build.project import Subsystem
 from ..jobs import Jobs
 from ..knowledge.graph import Graph, GraphPage
+from ..knowledge.principles import Principles
 from ..messages import say
 from ..model.models import Models
 from ..prompts import Prompts
@@ -26,6 +27,7 @@ from ..settings import (
 )
 from ..store import Log
 from . import memories, routes
+from .housekeeping import Housekeeping
 from .memories import (
     DREAM,
     Memories,
@@ -67,7 +69,18 @@ def by_speaker(episode):
 class Dream:
     STATE = "state"
     EVENTS = "dream events"
-    STEPS = ("consolidate", "revise", "decay", "traits", "merge_traits", "gists", "reflect")
+    STEPS = (
+        "consolidate",
+        "revise",
+        "decay",
+        "traits",
+        "merge_traits",
+        "merge_principles",
+        "gists",
+        "reflect",
+        "compact",
+    )
+    PRINCIPLE_RUN = "dream"
 
     def __init__(self, retriever, phase=lambda step: None):
         self.memories = Memories(retriever)
@@ -83,6 +96,7 @@ class Dream:
         return ending("done", "Dreamt")
 
     def walked(self, now):
+        began = stamp(now)
         state = self.state = new_state() | (Home.store().get(DREAM, self.STATE) or {})
         for step in self.STEPS:
             if step in state["done"]:
@@ -95,7 +109,7 @@ class Dream:
             state["changed"] += [memory_id for memory_id in self.changed if memory_id not in state["changed"]]
             state["counts"][step] = self.count
             Home.store().put(DREAM, self.STATE, state)
-        Home.store().put(DREAM, self.STATE, dict(state, done=[], changed=[], dreamt=[], last=stamp(now)))
+        Home.store().put(DREAM, self.STATE, dict(state, done=[], changed=[], dreamt=[], last=began))
 
     def consolidate(self, now=None):
         for batch in self.batches():
@@ -237,7 +251,7 @@ class Dream:
                 self.logged("decay", "retire", self.memories.retire(memory["id"], "faded"))
             elif expired(memory, now):
                 self.logged("decay", "retire", self.memories.retire(memory["id"], "expired"))
-        Scratchpad.prune(now)
+        Scratchpad.prune()
 
     def traits(self, now=None):
         episodes, people = self.dreamt_episodes(), self.changed_people()
@@ -278,7 +292,7 @@ class Dream:
         living = Traits().living()
         texts = [likeness_text(trait["when"], trait["do"]) for trait in living]
         for group in self.similar_groups(living, texts):
-            if len(group) > 1 and any(changed_since(trait, self.state["last"]) for trait in group):
+            if len(group) > 1 and any(changed_since(trait["history"], self.state["last"]) for trait in group):
                 self.traits_merged(group, now)
 
     def traits_merged(self, group, now):
@@ -294,6 +308,36 @@ class Dream:
                     self.trait_logged("merge_traits", "merge", trait)
                     for trait_id in ids:
                         self.trait_logged("merge_traits", "retire", by_id.pop(trait_id))
+
+    def merge_principles(self, now=None):
+        principles = Principles(self.memories.retriever.embeddings)
+        for living in by_scope(principles.live()):
+            texts = [likeness_text(principle.when, principle.do) for principle in living]
+            for group in self.similar_groups(living, texts):
+                if len(group) > 1 and any(changed_since(old.history, self.state["last"]) for old in group):
+                    self.principles_merged(principles, group)
+
+    def principles_merged(self, principles, group):
+        reply = asked(Prompts.DREAM_MERGE_PRINCIPLES_SYSTEM, merge_principles_text(group))
+        if not isinstance(reply, dict):
+            return
+        by_id = {principle.id: principle for principle in group}
+        for item in listed(reply.get("merge")):
+            ids = group_ids(item.get("ids"), by_id)
+            delta = {
+                "kind": "merge",
+                "ids": ids,
+                "when": said(item, "when"),
+                "do": said(item, "do"),
+                "because": said(item, "because"),
+            }
+            for merged in principles.apply([delta], self.PRINCIPLE_RUN):
+                self.principle_logged("merge", merged)
+                for principle_id in ids:
+                    self.principle_logged("retire", by_id.pop(principle_id))
+
+    def principle_logged(self, name, principle):
+        self.recorded("merge_principles", name, {"id": principle.id, "gist": principle.do})
 
     def gists(self, now=None):
         ungisted = {trait["id"]: trait for trait in Traits().confirmed() if not trait["gist"]}
@@ -313,6 +357,10 @@ class Dream:
             if done["thought"]:
                 self.recorded("reflect", "thought", {"id": "", "gist": done["thought"]})
         self.state["thoughts"] = (self.state["thoughts"] + reflection.thoughts)[-REFLECT_THOUGHTS:]
+
+    def compact(self, now=None):
+        for compacted in Housekeeping().compact():
+            self.recorded("compact", compacted.change, {"id": compacted.id, "gist": compacted.kind})
 
     def noting(self, step):
         def logged(name, record):
@@ -477,20 +525,49 @@ def merge_traits_text(group):
                 "about": trait["about"],
                 "when": trait["when"],
                 "do": trait["do"],
-                "changed": last_changed(trait),
+                "changed": last_changed(trait["history"]),
             }
-            for trait in sorted(group, key=last_changed, reverse=True)
+            for trait in sorted(group, key=lambda trait: last_changed(trait["history"]), reverse=True)
         ],
         ensure_ascii=False,
     )
 
 
-def changed_since(trait, last):
-    return last_changed(trait) > last
+def by_scope(principles):
+    scopes = {}
+    for principle in principles:
+        scopes.setdefault(principle.scope, []).append(principle)
+    return list(scopes.values())
 
 
-def last_changed(trait):
-    return max(entry["at"] for entry in trait["history"])
+def merge_principles_text(group):
+    return json.dumps(
+        [
+            {
+                "id": principle.id,
+                "when": principle.when,
+                "do": principle.do,
+                "because": principle.because,
+                "changed": last_changed(principle.history),
+            }
+            for principle in sorted(
+                group, key=lambda principle: last_changed(principle.history), reverse=True
+            )
+        ],
+        ensure_ascii=False,
+    )
+
+
+def changed_since(history, last):
+    return not last or as_time(last_changed(history)) >= as_time(last)
+
+
+def as_time(text):
+    return datetime.datetime.fromisoformat(text)
+
+
+def last_changed(history):
+    return max(entry["at"] for entry in history)
 
 
 def gists_text(traits):

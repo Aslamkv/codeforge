@@ -1,3 +1,4 @@
+import datetime
 import json
 
 import pytest
@@ -38,6 +39,11 @@ def test_a_new_principle_is_a_candidate_with_an_id_from_scope_when_and_do():
     assert principle.id != a_principle(do="use tmp_path").id
     assert principle.id != a_principle(scope="rust").id
     assert principle.history[0]["event"] == "born"
+
+
+def test_a_recorded_event_is_stamped_to_the_second():
+    stamped = principles_module.record({}, "helped", "run-1")["history"][-1]["at"]
+    assert datetime.datetime.strptime(stamped, "%Y-%m-%d %H:%M:%S")
 
 
 @pytest.mark.spec("PRI-1")
@@ -228,6 +234,75 @@ def test_apply_contradict_retires_one_harmed_more_than_its_evidence(principles):
     assert changed.history[-1]["event"] == "retired"
     assert "contradicted" in changed.history[-1]["reason"]
     assert principles.kept("python") == []
+
+
+def a_merge(*kept, **fields):
+    delta = {"kind": "merge", "ids": [principle.id for principle in kept]}
+    return {**delta, "when": "a test needs files", "do": "use tmp_path", "because": "isolation", **fields}
+
+
+@pytest.mark.spec("PRI-3", "DRM-13")
+def test_apply_merge_replaces_living_principles_with_one_that_sums_them(principles):
+    first = kept_principle(principles, helped=2, harmed=1, status="proven")
+    second = kept_principle(
+        principles,
+        do="never write to the home",
+        exceptions=["the file is a checked-in fixture", "the home is a fixture"],
+        evidence=[new_evidence("run-7"), new_evidence("run-8")],
+        phase="code",
+        helped=1,
+        harmed=3,
+    )
+    [merged] = principles.apply([a_merge(first, second)], "run-9")
+    assert principles.get(merged.id) == merged
+    assert (merged.when, merged.do, merged.because) == ("a test needs files", "use tmp_path", "isolation")
+    assert merged.scope == "python"
+    assert merged.phase == "tests"
+    assert merged.exceptions == ["the file is a checked-in fixture", "the home is a fixture"]
+    assert merged.evidence == [{"kind": "run", "ref": "run-7", "source": "lessons"}, new_evidence("run-8")]
+    assert (merged.helped, merged.harmed) == (3, 4)
+    assert merged.status == "proven"
+    for old in (first, second):
+        retired = principles.get(old.id)
+        assert retired.status == "retired"
+        assert retired.history[-1]["reason"] == f"merged into {merged.id}"
+    assert principles.kept("python") == [merged]
+
+
+@pytest.mark.spec("PRI-3", "DRM-13")
+def test_apply_merge_of_unproven_principles_is_a_candidate(principles):
+    first = kept_principle(principles)
+    second = kept_principle(principles, do="never write to the home")
+    [merged] = principles.apply([a_merge(first, second)], "run-9")
+    assert merged.status == "candidate"
+
+
+@pytest.mark.spec("PRI-3", "DRM-13")
+def test_apply_drops_a_merge_naming_fewer_than_two_living_ids(principles):
+    first = kept_principle(principles)
+    retired = kept_principle(principles, do="never write to the home", status="retired")
+    delta = a_merge(first, retired)
+    delta["ids"].append("unknown")
+    assert principles.apply([delta], "run-9") == []
+    assert principles.get(first.id).status == "candidate"
+    assert len(principles.all()) == 2
+
+
+@pytest.mark.spec("PRI-3", "DRM-13")
+def test_apply_drops_a_merge_with_no_do(principles):
+    first = kept_principle(principles)
+    second = kept_principle(principles, do="never write to the home")
+    assert principles.apply([a_merge(first, second, do="")], "run-9") == []
+    assert {principles.get(old.id).status for old in (first, second)} == {"candidate"}
+    assert len(principles.all()) == 2
+
+
+@pytest.mark.spec("PRI-3", "DRM-13")
+def test_apply_drops_a_merge_across_two_scopes(principles):
+    first = kept_principle(principles)
+    second = kept_principle(principles, scope="rust")
+    assert principles.apply([a_merge(first, second)], "run-9") == []
+    assert len(principles.live()) == 2
 
 
 @pytest.mark.spec("PRI-3")

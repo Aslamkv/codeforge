@@ -1,4 +1,5 @@
 import datetime
+import json
 
 import pytest
 from conftest import ask
@@ -19,13 +20,13 @@ from tinkerkit.ranking import Retriever
 from tinkerkit.settings import (
     EPISODE_FOUND_CHARS,
     EPISODE_GIST_CHARS,
-    EPISODE_KEPT_DAYS,
     RECALL_MEANING,
     RECALL_SHOWN,
     Home,
 )
 
 NOW = datetime.datetime(2026, 11, 11, 12, 0, 0)
+EPISODES_BUDGET = "tinkerkit.memory.memories.EPISODES_KEPT_BYTES"
 
 
 def chat_episode(**changes):
@@ -51,10 +52,11 @@ def test_a_written_episode_gets_the_next_id_its_time_and_is_not_dreamt(home_stor
 
 
 @pytest.mark.spec("REM-1")
-def test_ids_keep_counting_after_episodes_are_pruned(home_store):
+def test_ids_keep_counting_after_episodes_are_pruned(home_store, monkeypatch):
     Scratchpad.write(chat_episode(), NOW)
     Scratchpad.dreamt(["e1"], NOW)
-    Scratchpad.prune(NOW + datetime.timedelta(days=EPISODE_KEPT_DAYS + 1))
+    monkeypatch.setattr(EPISODES_BUDGET, 0)
+    Scratchpad.prune()
 
     assert Scratchpad.write(chat_episode(), NOW)["id"] == "e2"
 
@@ -103,17 +105,44 @@ def test_a_dreamt_episode_keeps_the_gist_the_dream_wrote_cut(home_store):
     assert "gist" not in Home.store().get("episodes", "e2")
 
 
+def episode_size(episode_id):
+    return len(json.dumps(Home.store().get("episodes", episode_id)))
+
+
 @pytest.mark.spec("REM-2")
-def test_prune_deletes_episodes_dreamt_longer_ago_than_kept(home_store):
-    Scratchpad.write(chat_episode(), NOW)
-    Scratchpad.write(chat_episode(), NOW)
-    Scratchpad.write(chat_episode(), NOW)
-    Scratchpad.dreamt(["e1"], NOW - datetime.timedelta(days=EPISODE_KEPT_DAYS + 1))
-    Scratchpad.dreamt(["e2"], NOW - datetime.timedelta(days=EPISODE_KEPT_DAYS - 1))
+def test_prune_deletes_the_oldest_dreamt_episodes_while_they_are_over_the_kept_space(home_store, monkeypatch):
+    for _ in range(4):
+        Scratchpad.write(chat_episode(), NOW)
+    Scratchpad.dreamt(["e2"], NOW - datetime.timedelta(days=3))
+    Scratchpad.dreamt(["e1"], NOW - datetime.timedelta(days=2))
+    Scratchpad.dreamt(["e3"], NOW - datetime.timedelta(days=1))
+    monkeypatch.setattr(EPISODES_BUDGET, episode_size("e1") + episode_size("e3"))
 
-    Scratchpad.prune(NOW)
+    Scratchpad.prune()
 
-    assert sorted(home_store.items("episodes")) == ["e2", "e3"]
+    assert sorted(home_store.items("episodes")) == ["e1", "e3", "e4"]
+
+
+@pytest.mark.spec("REM-2")
+def test_prune_keeps_dreamt_episodes_that_fit_however_old(home_store):
+    Scratchpad.write(chat_episode(), NOW)
+    Scratchpad.dreamt(["e1"], NOW - datetime.timedelta(days=3650))
+
+    Scratchpad.prune()
+
+    assert sorted(home_store.items("episodes")) == ["e1"]
+
+
+@pytest.mark.spec("REM-2")
+def test_prune_never_counts_or_deletes_fresh_episodes(home_store, monkeypatch):
+    Scratchpad.write(chat_episode(), NOW)
+    Scratchpad.write(chat_episode(message="m" * 5000), NOW)
+    Scratchpad.dreamt(["e1"], NOW)
+    monkeypatch.setattr(EPISODES_BUDGET, episode_size("e1"))
+
+    Scratchpad.prune()
+
+    assert sorted(home_store.items("episodes")) == ["e1", "e2"]
 
 
 @pytest.mark.spec("DRM-9")

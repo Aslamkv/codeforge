@@ -11,6 +11,7 @@ from conftest import ask, confirmed_trait, quick_model_replying, replying
 
 from tinkerkit.build.project import TrackedWork
 from tinkerkit.jobs import Jobs, Queue
+from tinkerkit.knowledge.principles import Principle, Principles
 from tinkerkit.memory import dream as dream_module
 from tinkerkit.memory import memories as memory_views
 from tinkerkit.memory import routes as route_views
@@ -593,6 +594,136 @@ def test_merge_traits_drops_a_merge_outside_the_group_or_without_a_do(home_store
     assert dream_events() == []
 
 
+def living_principle(do="keep replies short", when="chatting", scope="python", at=EARLIER):
+    principle = Principle.new(when, do, scope=scope, run="run-1", because="people skim")
+    principle.history = [dict(entry, at=at.isoformat()) for entry in principle.history]
+    Principles(None).put(principle)
+    return principle
+
+
+def merged_principles_reply(first, second, **fields):
+    merge = {"ids": [first.id, second.id], "when": "chatting", "do": "keep replies short, plain"}
+    return {"merge": [merge | {"because": "people skim"} | fields]}
+
+
+def living_dos():
+    return sorted(principle.do for principle in Principles(None).live())
+
+
+@pytest.mark.spec("DRM-7", "DRM-13", "PRI-3")
+def test_merge_principles_joins_a_changed_group_of_alike_principles_into_one(home_store, monkeypatch):
+    first = living_principle("keep replies short")
+    second = living_principle("keep every reply brief")
+    living_principle("answer with rust examples", "coding")
+    asked = replying(monkeypatch, merged_principles_reply(first, second))
+    merging = dream()
+    merging.merge_principles(NOW)
+    assert asked[0][0]["content"] == Prompts.DREAM_MERGE_PRINCIPLES_SYSTEM
+    shown = asked[0][1]["content"]
+    assert all(
+        text in shown for text in (first.id, second.id, "chatting", "people skim", EARLIER.isoformat())
+    )
+    assert "rust" not in shown
+    merged = next(
+        principle for principle in Principles(None).live() if principle.do == "keep replies short, plain"
+    )
+    assert (merged.when, merged.because, merged.scope) == ("chatting", "people skim", "python")
+    assert living_dos() == ["answer with rust examples", "keep replies short, plain"]
+    assert Principles(None).get(first.id).history[-1]["reason"] == f"merged into {merged.id}"
+    assert dream_events() == [
+        {"step": "merge_principles", "change": "merge", "id": merged.id, "gist": "keep replies short, plain"},
+        {"step": "merge_principles", "change": "retire", "id": first.id, "gist": "keep replies short"},
+        {"step": "merge_principles", "change": "retire", "id": second.id, "gist": "keep every reply brief"},
+    ]
+    assert merging.count == 3
+    assert merging.changed == []
+
+
+@pytest.mark.spec("DRM-13")
+def test_merge_principles_gives_the_group_newest_first(home_store, monkeypatch):
+    older = living_principle("keep replies short")
+    newer = living_principle("keep every reply brief", at=EARLIER + datetime.timedelta(days=1))
+    asked = replying(monkeypatch, {"merge": []})
+    dream().merge_principles(NOW)
+    assert [principle["id"] for principle in json.loads(asked[0][1]["content"])] == [newer.id, older.id]
+
+
+@pytest.mark.spec("DRM-13")
+def test_merge_principles_asks_nothing_for_a_group_unchanged_since_the_last_dream(home_store, monkeypatch):
+    living_principle("keep replies short")
+    living_principle("keep every reply brief")
+    asked = replying(monkeypatch)
+    merging = dream()
+    merging.state = dict(merging.state, last=NOW.isoformat())
+    merging.merge_principles(NOW)
+    assert asked == []
+
+
+@pytest.mark.spec("DRM-13")
+def test_merge_principles_asks_for_a_group_born_a_second_after_the_last_dream(home_store, monkeypatch):
+    last = datetime.datetime.now().replace(microsecond=0) - datetime.timedelta(seconds=1)
+    for do in ("keep replies short", "keep every reply brief"):
+        Principles(None).put(
+            Principle.new("chatting", do, scope="python", run="run-1", because="people skim")
+        )
+    asked = replying(monkeypatch, {"merge": []})
+    merging = dream()
+    merging.state = dict(merging.state, last=last.isoformat())
+    merging.merge_principles(NOW)
+    assert len(asked) == 1
+
+
+@pytest.mark.spec("DRM-13")
+@pytest.mark.parametrize(
+    ("at", "changed"),
+    [("2026-11-11 12:01", True), ("2026-11-11T12:00:00", True), ("2026-11-11 11:59", False)],
+)
+def test_changed_since_counts_a_change_at_or_after_the_dream_stamp_by_time(at, changed):
+    principle = Principle.new(
+        "chatting", "keep replies short", scope="python", run="run-1", because="people skim"
+    )
+    history = [dict(entry, at=at) for entry in principle.history]
+    assert dream_module.changed_since(history, memory_views.stamp(NOW)) is changed
+
+
+@pytest.mark.spec("DRM-13")
+def test_merge_principles_asks_nothing_without_alike_principles(home_store, monkeypatch):
+    living_principle("keep replies short")
+    living_principle("answer with rust examples", "coding")
+    asked = replying(monkeypatch)
+    dream().merge_principles(NOW)
+    assert asked == []
+
+
+@pytest.mark.spec("DRM-13")
+def test_merge_principles_never_groups_principles_of_two_scopes(home_store, monkeypatch):
+    living_principle("keep replies short")
+    living_principle("keep every reply brief", scope="rust")
+    asked = replying(monkeypatch)
+    dream().merge_principles(NOW)
+    assert asked == []
+
+
+@pytest.mark.spec("DRM-13", "PRI-3")
+def test_merge_principles_drops_a_merge_outside_the_group_or_without_a_do(home_store, monkeypatch):
+    first = living_principle("keep replies short")
+    second = living_principle("keep every reply brief")
+    other = living_principle("answer with rust examples", "coding")
+    replying(
+        monkeypatch,
+        {
+            "merge": [
+                {"ids": [first.id, other.id], "when": "", "do": "x"},
+                {"ids": [first.id, second.id], "when": "chatting"},
+                {"ids": [first.id, first.id], "when": "", "do": "x"},
+            ]
+        },
+    )
+    dream().merge_principles(NOW)
+    assert living_dos() == ["answer with rust examples", "keep every reply brief", "keep replies short"]
+    assert dream_events() == []
+
+
 @pytest.mark.spec("DRM-6")
 def test_traits_asks_nothing_without_a_dreamt_episode_or_a_changed_person(home_store, monkeypatch):
     fact = remembered("uses zsh", "The shell is zsh.")
@@ -783,7 +914,17 @@ def test_run_walks_its_steps_and_saves_the_state(home_store, monkeypatch):
     doing = []
     dream(doing.append).run(NOW)
     state = Home.store().get("dream", "state")
-    assert doing == ["consolidate", "revise", "decay", "traits", "merge_traits", "gists", "reflect"]
+    assert doing == [
+        "consolidate",
+        "revise",
+        "decay",
+        "traits",
+        "merge_traits",
+        "merge_principles",
+        "gists",
+        "reflect",
+        "compact",
+    ]
     assert state == {
         "done": [],
         "changed": [],
@@ -794,12 +935,31 @@ def test_run_walks_its_steps_and_saves_the_state(home_store, monkeypatch):
             "decay": 0,
             "traits": 0,
             "merge_traits": 0,
+            "merge_principles": 0,
             "gists": 0,
             "reflect": 0,
+            "compact": 0,
         },
         "last": NOW.isoformat(),
         "thoughts": [],
     }
+
+
+@pytest.mark.spec("DRM-2", "DRM-7", "DRM-14")
+def test_run_compacts_last_and_logs_each_compacted_one(home_store, monkeypatch):
+    route_views.Routes().apply(
+        [{"op": "add", "pattern": "show jobs", "line": "/jobs", "source": "model"}], NOW
+    )
+    route_views.Routes().apply([{"op": "retire", "id": "r1", "why": "wrong"}], NOW)
+    monkeypatch.setattr("tinkerkit.memory.housekeeping.RETIRED_KEPT_BYTES", 0)
+    replying(monkeypatch, {"thought": "", "add": [], "questions": [], "done": True})
+    dream().run(NOW)
+    assert dream_events() == [
+        {"step": "compact", "change": "stub", "id": "r1", "gist": "route"},
+        {"step": "compact", "change": "delete", "id": "r1", "gist": "route"},
+    ]
+    assert Home.store().get("dream", "state")["counts"]["compact"] == 2
+    assert Home.store().get("dream", "state")["changed"] == []
 
 
 @pytest.mark.spec("DRM-7", "DRM-8")
@@ -826,6 +986,22 @@ def test_run_skips_the_steps_already_done(home_store, monkeypatch):
     assert Home.store().get("dream", "state")["last"] == NOW.isoformat()
 
 
+@pytest.mark.spec("DRM-8")
+def test_a_dream_is_dated_by_when_it_began_so_a_change_it_made_is_seen_next_time(home_store, monkeypatch):
+    clock = iter(["2026-11-11T12:00:00", "2026-11-11T12:00:05"])
+    monkeypatch.setattr(dream_module, "stamp", lambda now: next(clock))
+    first, *rest = Dream.STEPS
+    Home.store().put("dream", "state", {"done": list(rest), "changed": [], "counts": {}, "last": ""})
+    replying(monkeypatch)
+    dreaming = dream()
+    made = []
+    monkeypatch.setattr(dreaming, first, lambda now: made.append({"at": dream_module.stamp(now)}))
+    dreaming.run()
+    last = Home.store().get("dream", "state")["last"]
+    assert last == "2026-11-11T12:00:00"
+    assert dream_module.changed_since(made, last)
+
+
 @pytest.mark.spec("DRM-2")
 def test_run_ignores_a_saved_step_it_no_longer_has(home_store, monkeypatch):
     episode()
@@ -834,7 +1010,16 @@ def test_run_ignores_a_saved_step_it_no_longer_has(home_store, monkeypatch):
     replying(monkeypatch, {"thought": "", "add": [], "questions": [], "done": True})
     doing = []
     dream(doing.append).run(NOW)
-    assert doing == ["revise", "decay", "traits", "merge_traits", "gists", "reflect"]
+    assert doing == [
+        "revise",
+        "decay",
+        "traits",
+        "merge_traits",
+        "merge_principles",
+        "gists",
+        "reflect",
+        "compact",
+    ]
     assert Home.store().get("dream", "state")["done"] == []
 
 
@@ -990,6 +1175,8 @@ def test_decay_retires_a_faded_memory_and_prunes_old_episodes(home_store, monkey
     old, young = episode(), episode()
     Scratchpad.dreamt([old["id"]], LONG_AGO)
     Scratchpad.dreamt([young["id"]], EARLIER)
+    young_size = len(json.dumps(Home.store().get(Scratchpad.EPISODES, young["id"])))
+    monkeypatch.setattr(memory_views, "EPISODES_KEPT_BYTES", young_size)
     asked = replying(monkeypatch)
     dream().decay(NOW)
     assert stored(faded["id"])["retired"] == "faded"

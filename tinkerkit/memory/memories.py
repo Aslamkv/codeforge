@@ -10,7 +10,7 @@ from ..settings import (
     ANSWER_SAME_WORDS,
     EPISODE_FOUND_CHARS,
     EPISODE_GIST_CHARS,
-    EPISODE_KEPT_DAYS,
+    EPISODES_KEPT_BYTES,
     QUESTION_SAME_MEANING,
     RECALL_MEANING,
     RECALL_SHOWN,
@@ -100,11 +100,17 @@ class Scratchpad:
             )
 
     @classmethod
-    def prune(cls, now):
-        oldest = now - datetime.timedelta(days=EPISODE_KEPT_DAYS)
-        for episode_id, episode in Home.store().items(cls.EPISODES).items():
-            if episode["dreamt"] and datetime.datetime.fromisoformat(episode["dreamt_time"]) < oldest:
-                Home.store().delete(cls.EPISODES, episode_id)
+    def prune(cls):
+        dreamt = sorted(
+            (episode for episode in Home.store().items(cls.EPISODES).values() if episode["dreamt"]),
+            key=lambda episode: episode["dreamt_time"],
+        )
+        size = sum(len(json.dumps(episode)) for episode in dreamt)
+        for oldest in dreamt:
+            if size <= EPISODES_KEPT_BYTES:
+                return
+            Home.store().delete(cls.EPISODES, oldest["id"])
+            size -= len(json.dumps(oldest))
 
 
 class Memories:

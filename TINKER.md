@@ -580,7 +580,10 @@ showing it the earlier answer, and the next dream keeps the new answer. An answe
 While nothing waits for it, Tinker dreams: a few seconds after the queue empties, it turns the fresh episodes
 into memories (about you, what you did, the tools you use, facts), joins the ones that say the same thing,
 lets fade what was never recalled or seen again, and notices traits: how you work and how you want Tinker to
-be, for good rather than for the moment. It joins traits that say the same thing into one, in the newer words.
+be, for good rather than for the moment. It joins traits that say the same thing into one, in the newer words,
+and principles the same way. It keeps what it let go within a fixed space, never by age: past that, the oldest
+retired memories, traits and routes shrink to a stub that still keeps a question from being asked twice, and the
+oldest dreamt episodes are deleted.
 A dream never decides a trait on its own: each one waits as a question for you. At the end of every dream Tinker
 reflects on who you are and who it should be for you, from what it kept, and each thought it keeps becomes a
 question with its guess at your answer. A dream is a job, so it never runs over a chat or a build:

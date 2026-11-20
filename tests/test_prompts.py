@@ -596,6 +596,15 @@ def test_the_merge_traits_prompt_says_the_traits_come_newest_first():
     assert "where they disagree, the newer wording wins" in prompt
 
 
+@pytest.mark.spec("DRM-13")
+def test_the_merge_principles_prompt_says_the_principles_come_newest_first():
+    prompt = " ".join(Prompts.DREAM_MERGE_PRINCIPLES_SYSTEM.split())
+
+    assert "The principles come newest first" in prompt
+    assert "where they disagree, the newer wording wins" in prompt
+    assert '"because"' in prompt
+
+
 @pytest.mark.spec("DRM-6")
 def test_the_dream_traits_prompt_asks_for_lasting_traits_each_with_a_question_thought_and_guess_for_the_person():
     prompt = " ".join(Prompts.DREAM_TRAITS_SYSTEM.split())

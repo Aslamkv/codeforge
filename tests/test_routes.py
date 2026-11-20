@@ -14,6 +14,7 @@ from tinkerkit.memory.routes import (
     show_routes,
     slotted,
 )
+from tinkerkit.settings import EVENTS_KEPT_PER_ITEM
 
 NOW = datetime.datetime(2026, 11, 20, 12, 0, 0)
 LATER = NOW + datetime.timedelta(seconds=60)
@@ -125,6 +126,15 @@ def test_use_confirm_miss_and_retire_change_the_route_and_its_history(home_store
     assert retired["history"][1]["text"] == "show the jobs"
     assert Routes().apply([{"op": "use", "id": "r1"}, {"op": "confirm", "id": "nope"}], NOW) == []
     assert Routes().living() == []
+
+
+@pytest.mark.spec("RTE-5")
+def test_a_living_route_keeps_only_its_newest_history_events(home_store):
+    Routes().apply([add_route()], NOW)
+    Routes().apply([{"op": "use", "id": "r1", "text": f"use {number}"} for number in range(25)], NOW)
+    (route,) = Routes().living()
+    assert len(route["history"]) == EVENTS_KEPT_PER_ITEM
+    assert [entry["text"] for entry in route["history"]] == [f"use {number}" for number in range(5, 25)]
 
 
 @pytest.mark.spec("RTE-5")

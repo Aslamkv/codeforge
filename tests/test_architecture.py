@@ -19,6 +19,7 @@ LAYERS = (
     "formats",
     "memory.memories",
     "memory.routes",
+    "memory.housekeeping",
     "logger",
     "system",
     "commands",

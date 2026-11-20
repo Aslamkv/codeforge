@@ -1600,6 +1600,9 @@ What every learning keeps: patterns found in what Tinker read or did, as princip
   (`harmed` + 1, `contradicted`), `except(id, exception, evidence)` (adds the exception). A delta naming an
   unknown id, or an add with no `do` or no evidence, is dropped. An add like a kept principle in its scope
   (alike, **KNW-11**, on `when` and `do`: words `SAME_FACT_SIMILARITY` or meaning `SAME_MEANING`) strengthens that one instead.
+  `merge(ids, when, do, because)` (**DRM-13**) adds a new principle with that wording, the union of their evidence
+  and exceptions, their `helped` and `harmed` summed, proven when any of them was and else a candidate, and retires
+  each old one "merged into <id>"; a merge naming fewer than two living ids of one scope, or with no `do`, is dropped.
 - **PRI-4** `Inducer.induce(passages, scope)` makes one call (`INDUCE_SYSTEM`) with numbered passages (source
   text, never facts made from it) and, numbered after them, the kept principles of that scope most about the
   passages (**PRI-6**, at most `INDUCE_KNOWN_SHOWN`). The reply is a list of deltas, each citing the passages it
@@ -1778,8 +1781,9 @@ Nothing here calls the model.
   (**CNV-18**). An episode has the next id `eN`, its chat, its time
   and `dreamt` false. A `system` check's output (**SYS-1**) is never kept.
 - **REM-2** A dreamt episode keeps only its gist: the gist the dream wrote for it (**DRM-3**), else its texts
-  cut to `EPISODE_GIST_CHARS`. It is deleted
-  `EPISODE_KEPT_DAYS` (30) days after it was dreamt; a memory's source that is gone shows as `gone`.
+  cut to `EPISODE_GIST_CHARS`. The dreamt episodes are kept by space, never by days: while their size (the length
+  of each one's JSON) is over `EPISODES_KEPT_BYTES` (1 000 000), the oldest dreamt one is deleted. A fresh episode
+  is never counted or deleted; a memory's source that is gone shows as `gone`.
 - **REM-3** A memory in `memories` is `{id, kind, gist, text, sources, first_seen, last_seen, recalled,
   last_recalled, strength, retired}`: id `mN`, kind `person`, `fact`, `done`, `tool` or `answer`, `sources` the
   ids of the episodes it came from (at least one: `Memories` refuses a memory without), and `retired` empty or
@@ -1882,7 +1886,8 @@ model.
   candidate, or confirmed when the person said it), `use` (uses one higher), `confirm` (a candidate confirmed),
   `miss` (misses one higher) and `retire` (with why). An add whose pattern a living route has confirms that route
   when it has the same line, else retires it and adds the new one; an add whose pattern only a retired route with
-  the same line has is dropped, so nothing is asked twice. A line that deletes (**SET-8**) is never added.
+  the same line has is dropped, so nothing is asked twice. A line that deletes (**SET-8**) is never added. A
+  living route's history keeps its newest `EVENTS_KEPT_PER_ITEM` (20) events.
 - **RTE-6** A line from the model or a candidate route that is not a glance (**CMD-1**), `none`, `/instruct` or a
   deletion is proposed before it runs, in plain words and never as command syntax: "I think you mean NAME: WHAT
   (VALUES). Shall I?", NAME the command's name without its slash and WHAT its `what` (with no `what`, "I think you
@@ -1939,7 +1944,7 @@ the person (**INT**).
   them, and a dream pushed back goes on later (**JOB-2**). Only one dream is in the queue at a time.
   `tinker dream run` queues one now.
 - **DRM-2** `Dream.run()` goes through its steps in turn, consolidate, revise, decay, traits, merge traits (**DRM-12**),
-  gists and reflect (**DRM-11**), each saved
+  merge principles (**DRM-13**), gists, reflect (**DRM-11**) and compact (**DRM-14**), each saved
   when done in `dream`/`state`, so a dream that goes on skips the steps done; its tracker's `doing` names the
   step.
 - **DRM-3** Consolidate takes the fresh episodes chat by chat, at most `DREAM_BATCH_EPISODES` (12) to a call.
@@ -1970,8 +1975,8 @@ the person (**INT**).
   the sum of their strengths; the old ones are retired "merged into mN".
 - **DRM-5** Decay, with no model, retires "faded" each memory neither recalled nor confirmed for
   `DREAM_FORGET_DAYS` (60) whose strength is below `DREAM_KEEP_STRENGTH` (3), retires "expired" each answer
-  memory a day (`lasts` `day`) or 30 days (`month`) after its `last_seen`, and deletes the dreamt episodes
-  older than **REM-2** allows.
+  memory a day (`lasts` `day`) or 30 days (`month`) after its `last_seen`, and deletes the oldest dreamt episodes
+  beyond the space **REM-2** allows.
 - **DRM-6** Traits, only when this dream dreamt an episode or changed a `person` memory, gives
   `DREAM_TRAITS_SYSTEM` the gists of the episodes this dream dreamt, the `person` memories it changed and the living
   traits, and reads `{add: [{about, when, do, sources, question, thought, expected}], support: [{id, sources}]}`:
@@ -1982,7 +1987,9 @@ the person (**INT**).
   words that name no id.
 - **DRM-7** Each change a dream makes is added to log `dream events` as `{step, change, id, gist}`.
 - **DRM-8** `tinker dream` (or `dream status`) says when the last dream was, how many changes each step made,
-  how many episodes and questions wait, and whether a dream is queued or running.
+  how many episodes and questions wait, and whether a dream is queued or running. A dream's time is when it began,
+  to the second; a change "since the last dream" is one at or after that time, so nothing changed while it ran is
+  missed.
 - **DRM-9** `tinker dream graph` (command line only) serves a live page on `127.0.0.1` at a random port
   (`ThreadingHTTPServer`), with a token in its path (any other path is 403): one self-contained page as
   **GRF-4**, the graph of episodes and memories (links: a memory's sources, `merged into`), updated by
@@ -1999,6 +2006,17 @@ the person (**INT**).
   history event since the last dream (teaching and the interview change traits too): `DREAM_MERGE_TRAITS_SYSTEM`
   (given the traits newest first, and told so) answers `{merge: [{ids, when, do}]}`, the newer wording winning where they disagree, each applied as a `merge`
   delta (**REM-14**). With no such group it makes no call.
+- **DRM-13** Merge principles joins alike living principles (as **GRF-3**, on `when` and `do`, only within one
+  scope) of a group where one has a history event since the last dream: `DREAM_MERGE_PRINCIPLES_SYSTEM` (given the
+  principles newest first, and told so) answers `{merge: [{ids, when, do, because}]}`, the newer wording winning
+  where they disagree, each applied as a `merge` delta (**PRI-3**). With no such group it makes no call.
+- **DRM-14** Compact, with no model, keeps the retired memories, traits and routes within `RETIRED_KEPT_BYTES`
+  (1 000 000, the length of each one's JSON, all three together). Over it, the oldest retired one is shrunk to a
+  stub, then the next, until they fit; only when all are stubs and still over are stubs deleted, oldest first. A
+  stub keeps every key with its big ones emptied (a memory's `text` "" and `sources` []; a trait's `sources` and
+  `history` []; a route's `history` []) and adds `stub` true and `at`, when it was retired (a memory's
+  `last_seen`, a trait's or route's last history `at`), which orders them oldest first. A stub still keeps a
+  retired trait or route from being asked twice (**REM-14**, **RTE-5**). Living ones are never touched.
 
 ## memory.interview (INT)
 

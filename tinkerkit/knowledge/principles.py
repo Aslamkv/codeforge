@@ -1,4 +1,5 @@
 from dataclasses import asdict, dataclass, field
+from datetime import datetime
 
 from ..prompts import Part, Prompts
 from ..ranking import Likeness, Retriever
@@ -12,7 +13,7 @@ from ..settings import (
     SAME_MEANING,
     Home,
 )
-from ..text import fingerprint, now_text, one_line
+from ..text import clock, fingerprint, one_line
 
 
 @dataclass
@@ -149,6 +150,7 @@ class Principles:
             "strengthen": self.strengthen,
             "contradict": self.contradict,
             "except": self.add_exception,
+            "merge": self.merge,
         }
         apply_kind = kinds.get(delta.get("kind"))
         return apply_kind(delta, run) if apply_kind else None
@@ -200,6 +202,41 @@ class Principles:
         if principle:
             principle.except_when(exception, list(delta.get("evidence", [])), run)
         return principle
+
+    def merge(self, delta, run):
+        olds = self.living(delta.get("ids", []))
+        if not delta.get("do") or len(olds) < 2 or len({old.scope for old in olds}) > 1:
+            return None
+        merged = Principle.new(
+            delta.get("when", ""),
+            delta["do"],
+            scope=olds[0].scope,
+            run=run,
+            because=delta.get("because", ""),
+            exceptions=union(old.exceptions for old in olds),
+            evidence=union(old.evidence for old in olds),
+            helped=sum(old.helped for old in olds),
+            harmed=sum(old.harmed for old in olds),
+            phase=olds[0].phase,
+            status="proven" if any(old.status == "proven" for old in olds) else "candidate",
+        )
+        for old in olds:
+            old.retire(f"merged into {merged.id}", run)
+            self.put(old)
+        return merged
+
+    def living(self, ids):
+        found = (self.get(principle_id) for principle_id in dict.fromkeys(ids))
+        return [principle for principle in found if principle and principle.status != "retired"]
+
+
+def union(lists):
+    joined = []
+    for items in lists:
+        for item in items:
+            if item not in joined:
+                joined.append(item)
+    return joined
 
 
 class Inducer:
@@ -301,7 +338,7 @@ class Inducer:
 
 
 def record(item, event, run):
-    item["history"] = (item.get("history", []) + [{"event": event, "run": run, "at": now_text()}])[
+    item["history"] = (item.get("history", []) + [{"event": event, "run": run, "at": clock(datetime.now())}])[
         -EVENTS_KEPT_PER_ITEM:
     ]
     if event == "helped":

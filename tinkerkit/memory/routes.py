@@ -3,7 +3,7 @@ from pathlib import Path
 from typing import NamedTuple
 
 from ..messages import say
-from ..settings import ROUTE_CORRECTION_SECONDS, ROUTE_SAME_WORDS, Home
+from ..settings import EVENTS_KEPT_PER_ITEM, ROUTE_CORRECTION_SECONDS, ROUTE_SAME_WORDS, Home
 from ..text import similarity
 from .memories import counted, history_entry, stamp
 
@@ -178,7 +178,9 @@ class Routes:
             lambda route: dict(
                 route,
                 **changes(route),
-                history=route["history"] + [history_entry(event, at, delta.get("text", ""))],
+                history=(route["history"] + [history_entry(event, at, delta.get("text", ""))])[
+                    -EVENTS_KEPT_PER_ITEM:
+                ],
             ),
         )
 

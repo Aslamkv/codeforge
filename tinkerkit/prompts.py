@@ -1302,6 +1302,17 @@ Reply with ONLY JSON: {"claims":[{"claim":1,"verdict":"holds","why":"one short s
         "Use only the ids you are given. Leave the list empty when nothing fits."
     )
 
+    DREAM_MERGE_PRINCIPLES_SYSTEM = (
+        "You tidy the principles Tinker learned. You get a group of similar principles of one scope, each "
+        "with its id, when (the situation it holds in, empty when it always holds), do (what to do), because "
+        "(why) and when it last changed. The principles come newest first. Join the ones that say the same "
+        "thing into one principle; where they disagree, the newer wording wins. Reply with only one JSON "
+        "object:\n"
+        '{"merge":[{"ids":["p1","p2"],"when":"the situation, or empty","do":"what to do",'
+        '"because":"why"}]}\n'
+        "Use only the ids you are given. Leave the list empty when nothing fits."
+    )
+
     DREAM_GISTS_SYSTEM = (
         "You shorten what is known about a person and about Tinker for them. You get traits, each with its "
         "id and do, the trait as said. Give each the shortest wording that keeps its meaning. Reply with only "
