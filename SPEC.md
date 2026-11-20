@@ -74,8 +74,7 @@ with a dot, and each imports only the modules listed above it:
 | `system` | what this computer tells at once by fixed read-only commands, with no model (`SystemCheck`, `SYSTEM_CHECKS`) |
 | `commands` | the one table of Tinker's commands with each one's kind (`kind_of`, `deletes`), the command a chat message names (`command_of`, `command_words`), and project references (`@ID`, `@folder`) |
 | `jobs` | every long command as a job, listed, stopped and resumed (`Jobs`), its journal of requests and answers (`Journal`, `journaled`), and its log of model calls (`calls_log`) |
-| `instructions` | the instructions kept in the home (`Instructions`) and each confirmed command line run detached, watched, paused, stopped and undone from its backups (`Run`) |
-| `instructions` | what the person asks Tinker to run on this computer: each instruction and its thread (`Instructions`), and a run started on its own, watched and signalled (`Run`) |
+| `instructions` | what the person asks Tinker to run on this computer: each instruction and its thread, kept in the home (`Instructions`), and each confirmed command line run detached, watched, paused, stopped and undone from its backups (`Run`) |
 | `chat.ledger` | what is said in the chats, so a chat is only a view of it: each message with when it goes, each thing shown, numbered, for `history` (`Ledger`) |
 | `prompts` | prompt parts (`Part`), replies (`Reply`), every system prompt (`Prompts`) |
 | `workspace` | the project's files and the commands run in it (`Workspace`, `Toolchain`, `TestRef`, `Output`, `FileView`, `TaughtCommands`) |
@@ -146,6 +145,7 @@ The Tinker home (**SET-1**) holds:
 | `reading/` | each kept file, as `FINGERPRINT.EXT` (**RDG-6**) |
 | `skills/` | a folder of its own for each skill run, its trial included (**SKL-4**) |
 | `instruction/` | `N/R/` for run R of instruction #N: its `run.sh`, `output.log`, `state`, `ended`, `folder`, `stopped` and backups (**INS-4**) |
+| `jobs/` | `N/` for job #N's run: its `run.sh`, `output.log`, `state` and `ended` (**JOB-9**), until the job is archived |
 
 The home database holds these collections and logs. `tinker clear PART` deletes a part (**SET-9**), named in
 the last column:
@@ -174,8 +174,7 @@ the last column:
 | `jobs`, `job numbers` | every job: its number, command, title, arguments, state, process, dates and tracker; the last number given, kept by a clear | `jobs` |
 | log `calls #N` | the model calls and details of job #N (a run's go to its project's `events`), until the job is archived (**JOB-12**) | `jobs` |
 | log `journal #N` | job #N's requests (model calls, web searches, page fetches) with their answers, until it finishes | `jobs` |
-| `job queue`, `job runner` | the job numbers in the queue, head first (**JOB-8**); the process that runs it (**JOB-9**) | `jobs` |
-| log `output #N` | what job #N printed as the runner ran it (**JOB-9**), until the job is archived | `jobs` |
+| `job queue`, `job runner` | the job numbers in the queue, head first (**JOB-8**); the live Tinker that starts its head (**JOB-9**) | `jobs` |
 | `instructions`, `instruction numbers` | every instruction: its number, title, request, thread, working folder and runs (**INS-1**); the last number given | |
 | `episodes` | what each chat request, command line and build did (**REM-1**) | |
 | `memories` | what the dream kept of the episodes (**REM-3**) | |
@@ -423,8 +422,7 @@ goes to the front, so the person is always answered first.
 
 - **JOB-1** `is_job(argv)` is true for a command of kind `job` or `pauses` (**CMD-1**): `task`, `restart`, `resume`,
   `confirm`, `amend`, `add`, `fix`, `model calibrate NAME`, `model recipe all`, `learn`, `ask`, `teach`, `read`, `research`, `exercise`, `chat`, `dream run` and `skill` (`skill learn` and a skill's use). Help,
-  and a build an exercise runs (`EXERCISE_ENV`, which holds the exercise's job number), are never jobs. A job keeps the
-  computer awake while it runs (**SET-10**). `Jobs.running(argv)` makes a job the next number (`#1`, `#2` ...), kept in
+  and a build an exercise runs (`EXERCISE_ENV`, which holds the exercise's job number), are never jobs. `Jobs.running(argv)` makes a job the next number (`#1`, `#2` ...), kept in
   the home's `jobs` with its command, title, arguments, the day it started, its state, its process and its tracker
   (`progress`, **PRJ-14**), and puts it at the front of the queue (**JOB-8**). Its process takes `JOB_STOP_SIGNAL`
   (SIGUSR2) as Ctrl-C.
@@ -452,7 +450,7 @@ goes to the front, so the person is always answered first.
 - **JOB-6** `tinker jobs [running|queued|stopped|finished|archived] [PAGE]` lists the jobs by page
   ([State](#state)): with no state, the running one, then the queued ones in queue order, then the stopped
   ones. Any other words are an error. `tinker jobs #N` shows job #N's view: its number, state and title, then
-  what it has printed so far (log `output #N`), its last `JOB_OUTPUT_LINES` lines, saying how many earlier ones
+  what it has printed so far (`output.log` in its job folder, **JOB-9**), its last `JOB_OUTPUT_LINES` lines, saying how many earlier ones
   are left out, or that it has printed nothing yet, or, archived, that its output is gone. An unknown job is an
   error. In a chat, `/jobs #N` enters the job (**CNV-25**), and `/jobs` also lists the live instruction runs
   (**INS-6**).
@@ -460,7 +458,8 @@ goes to the front, so the person is always answered first.
   Ctrl-C (one not in the queue is an error); `tinker stop` stops the job that runs, whatever it is, a chat's
   answer too. In the conversation, `/stop #N` stops that job (the task started here, the exercise in its own
   message, or one elsewhere) and `/stop` the job that runs, and `/resume [#N]` starts `tinker resume #N` as a
-  job (an exercise as the exercise). A stopped job never goes on by itself. `queue list` (`tinker queue list`,
+  job (an exercise as the exercise). A stop is the only thing that ends a job that runs (**JOB-10**), and a
+  stopped job never goes on by itself. `queue list` (`tinker queue list`,
   `/queue list`) lists the queue in order, its head first; `queue stop #N` is `stop #N`; `queue stop all` stops
   the job that runs and takes every job out. Inside an instruction, `/stop` and `/resume` act on its run instead
   (**INS-6**).
@@ -468,29 +467,32 @@ goes to the front, so the person is always answered first.
   at the front (whatever the person asks for). The head a new front pushes back is sent `JOB_STOP_SIGNAL`: it saves
   itself, its process ends, and it stays queued, second. A job leaves the queue when it ends or is stopped. No rule
   refuses a job because another runs: not the conversation's task, nor a second exercise.
-- **JOB-9** One `Runner` runs the queue: a thread in a long-lived Tinker process, claimed in the home (its
-  process, `alive(pid, began)`); when its holder is gone, the next Tinker process that can host one takes over.
-  The conversation (the console, a channel's bot) hosts one, and so does a job command in a terminal while no
-  runner is alive; short commands (`jobs`, `stop`, `queue`, a glance) never do. The runner starts the head as a
-  process of its own, `tinker ARGS` (`resume #N` for a job that ran before, which skips what it did), marked as
-  the runner's job #N so it does not queue itself again, and keeps what it prints in log `output #N`. An add in
-  the runner's own process wakes it at once; otherwise it reads the queue once every `QUEUE_LOOK_SECONDS`
-  seconds. It runs until the queue is empty, so the queue goes on whenever a Tinker that hosts it starts. A head
-  whose process ends while it is still the head, the runner not paused, is a failed start; after `JOB_START_TRIES`
-  of them in a row the runner gives up on it: the job is `stopped`, leaves the queue, and log `output #N` says why
-  (`resume #N` tries it again). An idle queue starts a dream (**DRM-1**).
+- **JOB-9** A live Tinker is an event loop: it takes requests, starts long work as a job and goes back to
+  listening. The conversation (the console, a channel's bot) and a job command in a terminal are live Tinkers;
+  short commands (`jobs`, `stop`, `queue`, a glance) never are. One `Runner` starts the queue's head: a live
+  Tinker's loop, claimed in the home (its process, `alive(pid, began)`); when its holder is gone, the next live
+  Tinker takes over. When the head's process is not alive, the runner starts it as a detached run in its job
+  folder `jobs/N/` (a Home method, **ARCH-4**): `run.sh` (in that folder, `tinker ARGS` marked as job #N so it
+  does not queue itself again, `resume #N` for a job that ran before, which skips what it did; runnable by
+  hand), `output.log` (what it prints, kept across its starts), `state` (pid, start time) and `ended` (exit
+  code, written by the run itself for each start). It starts as an instruction's run does (**INS-4**), with the
+  same code, but is not kept awake. A job does not know Tinker exists: it never starts the next head, nor
+  Tinker. An add in the runner's own process wakes it at once; otherwise it reads the queue once every
+  `QUEUE_LOOK_SECONDS` seconds. Jobs left in the queue while no Tinker is live wait for the next one. A head
+  whose process ends while it is still the head is a failed start; after `JOB_START_TRIES` of them in a row the
+  runner gives up on it: the job is `stopped`, leaves the queue, and its `output.log` says why (`resume #N`
+  tries it again). An idle queue starts a dream (**DRM-1**).
 - **JOB-10** Whoever asked for a job follows it: a job command in a terminal (and the conversation's own
   `tinker ...` process) puts its job at the front, keeps its own pid on the job as `follower` (so
   `Jobs.of_process` finds the job by it too, and the conversation tracks the job's progress, ending and files),
-  prints log `output #N` as it grows and ends once its job leaves the queue, with the exit code its job's
-  process ended with when that is above 0 (bad arguments end with 2), else 0; one that hosts the runner keeps it
-  until the queue is empty. Ctrl-C there, and quitting the conversation, pause the job that runs: it stays at the
-  head and goes on when Tinker starts next, or at once if another live Tinker runs the queue. A glance
-  (**CMD-1**) never enters the queue.
+  prints its job's `output.log` as it grows and ends once its job leaves the queue, with the exit code in its
+  job's `ended` when that is above 0 (bad arguments end with 2), else 0. Ctrl-C there, and quitting the
+  conversation, leave the job that runs going; only a stop ends it (**JOB-7**). A glance (**CMD-1**) never
+  enters the queue.
 - **JOB-11** `tinker clear jobs [#N...] [--yes]` archives those jobs (with no `#N`, every stopped and finished
   one), as a deletion (**SET-8**): each is kept with the state `archived` (and `archived_from`, the state it
-  had), listed by `tinker jobs archived` and not without a state, and its journal and its `calls #N` log are
-  deleted. An archived job is not resumed (**JOB-5**). An unknown job, one in the queue, one archived
+  had), listed by `tinker jobs archived` and not without a state, and its journal, its `calls #N` log and its
+  job folder are deleted. An archived job is not resumed (**JOB-5**). An unknown job, one in the queue, one archived
   already, and any word but `#N` are refused with why.
 - **JOB-12** `calls_log()` is the one log of a job's model calls: `calls #N` for the job that runs, kept when
   it finishes and deleted when it is archived (**JOB-11**). Outside a job it keeps nothing. `learn`, `ask`,
@@ -1215,7 +1217,8 @@ The terminal and the chats are one conversation: the same commands, the same ans
   otherwise leaves that chat out. As each chat starts, what the last Tinker left in it is cleared as `clear chat` does,
   its banner from before is taken out, and the banner (**CNV-6**) is sent before the status. The terminal never waits on
   a chat: each chat starts in its own thread, and what Tinker does every few seconds while it listens (collecting the
-  messages whose time is up, saying the status, taking up an exercise that runs) runs in a thread of its own, from the
+  messages whose time is up, saying the status, taking up an exercise that runs, starting the queue's head when it
+  holds the runner, **JOB-9**) runs in a thread of its own, from the
   start, so the terminal reads at once and `/exit` or Ctrl-C ends Tinker at once. Tinker tells and never waits as it
   ends: it hands its last status (`not listening`) and the question to stop, to be taken out, to a sender that runs on
   its own (`tinker channel goodbye`, left out of the usage), and exits; the sender clears each chat as `clear chat` does

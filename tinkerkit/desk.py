@@ -66,6 +66,7 @@ from .jobs import (
     ending,
     job_number,
     job_view,
+    printed_lines,
     queue_action,
     queue_lines,
     stop_answers,
@@ -749,7 +750,6 @@ class Desk:
         try:
             self.listen_until_ended()
         except KeyboardInterrupt:
-            Runner.pause(self.hosting)
             self.close_channels()
             self.stop_task()
             self.say_goodbye()
@@ -834,8 +834,7 @@ class Desk:
 
     @staticmethod
     def ending_of(job):
-        entries = Home.store().entries(f"output #{job['number']}")
-        return "\n".join(entry["line"] for _, entry in entries if "line" in entry)
+        return "\n".join(printed_lines(job["number"]))
 
     def say_everywhere(self, text):
         for channel in self.channels:

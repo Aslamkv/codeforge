@@ -385,6 +385,16 @@ class Home:
         return folder / (re.sub(r"[^\w.-]+", "-", Path(name).name).strip("-.") or "book")
 
     @classmethod
+    def job_folder(cls, number):
+        folder = cls.job_path(number)
+        folder.mkdir(parents=True, exist_ok=True)
+        return folder
+
+    @classmethod
+    def job_path(cls, number):
+        return cls.root / "jobs" / str(number)
+
+    @classmethod
     def run_folder(cls, number):
         folder = cls.root / "instruction" / str(number)
         folder.mkdir(parents=True, exist_ok=True)

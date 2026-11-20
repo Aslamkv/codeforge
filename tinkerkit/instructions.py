@@ -4,7 +4,6 @@ import re
 import signal
 from typing import NamedTuple
 lazy import json
-lazy import shlex
 lazy import shutil
 lazy import subprocess
 lazy import threading
@@ -12,7 +11,7 @@ lazy from datetime import datetime
 lazy from pathlib import Path
 
 from .settings import Numbered
-lazy from .jobs import alive, began_at
+lazy from .jobs import alive, launch
 lazy from .settings import Home
 lazy from .text import first_line
 
@@ -153,7 +152,6 @@ class Backups(NamedTuple):
 
 
 class Run:
-    LOGIN_SHELL = os.environ.get("SHELL") or "/bin/sh"
     CLONE = ("cp", "-c", "-R")
 
     @staticmethod
@@ -161,18 +159,8 @@ class Run:
         run_folder = Home.run_folder(number)
         place = os.path.expanduser(folder)
         Run.back_up(run_folder, Run.existing(place, touches))
-        (run_folder / "run.sh").write_text(f"cd {shlex.quote(place)}\nset -o pipefail\n{line}\n")
-        with open(run_folder / "output.log", "w") as output:
-            process = subprocess.Popen(
-                [Run.LOGIN_SHELL, "-lc", Run.launcher(run_folder)],
-                cwd=place,
-                stdin=subprocess.DEVNULL,
-                stdout=output,
-                stderr=subprocess.STDOUT,
-                start_new_session=True,
-            )
-        (run_folder / "state").write_text(json.dumps({"pid": process.pid, "began": began_at(process.pid)}))
-        Home.keep_awake(process.pid)
+        pid = launch(run_folder, place, ["set -o pipefail", line], "w")
+        Home.keep_awake(pid)
         return run_folder
 
     @staticmethod
@@ -239,13 +227,6 @@ class Run:
             shutil.rmtree(path)
         elif path.exists() or path.is_symlink():
             path.unlink()
-
-    @staticmethod
-    def launcher(run_folder):
-        script = shlex.quote(str(run_folder / "run.sh"))
-        ended = shlex.quote(str(run_folder / "ended"))
-        folder = shlex.quote(str(run_folder / "folder"))
-        return f"( trap 'pwd > {folder}' EXIT; . {script} ); echo $? > {ended}.new; mv {ended}.new {ended}"
 
     @staticmethod
     def ended(run_folder):

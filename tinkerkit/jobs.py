@@ -3,6 +3,8 @@ import os
 import signal
 lazy import datetime
 lazy import json
+lazy import shlex
+lazy import shutil
 lazy import subprocess
 lazy import sys
 lazy import threading
@@ -35,6 +37,7 @@ QUEUE_LOOK_SECONDS = 1
 WAITING = ("running", "queued", "paused")
 ANSWERS = {}
 JOB_OUTPUT_LINES = 40
+LOGIN_SHELL = os.environ.get("SHELL") or "/bin/sh"
 
 
 class Queue:
@@ -50,7 +53,7 @@ class Queue:
     def add_front(number):
         pushed_back = Queue.head()
         Queue.place(number, lambda others: [number] + others)
-        if pushed_back not in (None, number) and JOBS.get(pushed_back):
+        if pushed_back not in (None, number) and (JOBS.get(pushed_back) or {}).get("pid"):
             signal_job(JOBS.get(pushed_back))
         Runner.wake.set()
 
@@ -67,8 +70,8 @@ class Queue:
 
 class Runner:
     wake = threading.Event()
-    paused = False
     idle_since = None
+    last_started = None
 
     @classmethod
     def host(cls):
@@ -88,13 +91,6 @@ class Runner:
         return Home.store().update(*RUNNER, held) == me
 
     @classmethod
-    def pause(cls, hosting):
-        cls.paused = hosting
-        head = JOBS.get(Queue.head()) if Queue.head() is not None else None
-        if head and alive(head.get("pid"), head.get("pid_began")):
-            signal_job(head)
-
-    @classmethod
     def run(cls):
         while True:
             cls.go_through()
@@ -103,10 +99,19 @@ class Runner:
 
     @classmethod
     def go_through(cls):
-        while not cls.paused and (number := cls.startable()) is not None:
-            cls.run_job(number)
-        if not cls.paused:
-            cls.dream_when_idle(time.monotonic())
+        cls.judge_last_start()
+        if (number := cls.startable()) is not None:
+            cls.last_started = number
+            cls.detach(JOBS.get(number))
+        cls.dream_when_idle(time.monotonic())
+
+    @classmethod
+    def judge_last_start(cls):
+        number = cls.last_started
+        if number is None or JOBS.get(number) is None or cls.running(JOBS.get(number)):
+            return
+        cls.last_started = None
+        cls.count_failed_start(number)
 
     @classmethod
     def dream_when_idle(cls, now):
@@ -141,24 +146,18 @@ class Runner:
         while number is not None and JOBS.get(number) is None:
             Queue.remove(number)
             number = Queue.head()
-        if number is None or alive(JOBS.get(number).get("pid"), JOBS.get(number).get("pid_began")):
+        if number is None or Runner.running(JOBS.get(number)):
             return None
         return number
 
-    @classmethod
-    def run_job(cls, number):
-        process = cls.start(JOBS.get(number))
-        output = Log(Home.store(), f"output #{number}")
-        for line in process.stdout:
-            output.add({"line": line.rstrip("\n")})
-        code = process.wait()
-        cls.count_failed_start(number, output)
-        output.add({"exit": code})
+    @staticmethod
+    def running(job):
+        state = Home.job_path(job["number"]) / "state"
+        run = json.loads(state.read_text()) if state.exists() else {}
+        return alive(job.get("pid"), job.get("pid_began")) or alive(run.get("pid"), run.get("began"))
 
     @classmethod
-    def count_failed_start(cls, number, output):
-        if cls.paused:
-            return
+    def count_failed_start(cls, number):
         failures = JOBS.get(number).get("start_failures", 0)
         if Queue.head() != number:
             if failures:
@@ -166,27 +165,35 @@ class Runner:
             return
         Jobs.update(number, start_failures=failures + 1)
         if failures + 1 >= JOB_START_TRIES:
-            cls.give_up(number, output)
+            cls.give_up(number)
 
     @staticmethod
-    def give_up(number, output):
+    def give_up(number):
         Jobs.update(number, state="stopped", start_failures=0)
         Queue.remove(number)
-        output.add(
-            {
-                "line": f"gave up after {JOB_START_TRIES} failed starts in a row; resume #{number} tries it again"
-            }
-        )
+        with open(Home.job_folder(number) / "output.log", "a") as output:
+            output.write(
+                f"gave up after {JOB_START_TRIES} failed starts in a row; resume #{number} tries it again\n"
+            )
 
     @staticmethod
-    def start(job):
-        return tinker_process(
-            Runner.arguments(job),
-            job.get("folder"),
-            subprocess.PIPE,
-            NO_COLOR="1",
-            **{RUNNER_JOB_ENV: str(job["number"])},
-        )
+    def detach(job):
+        folder = Home.job_folder(job["number"])
+        place = os.path.expanduser(job.get("folder") or str(Home.root))
+        (folder / "ended").unlink(missing_ok=True)
+        launch(folder, place, [Runner.command_line(job)], "a")
+        return folder
+
+    @staticmethod
+    def command_line(job):
+        environment = {
+            RUNNER_JOB_ENV: str(job["number"]),
+            "NO_COLOR": "1",
+            "PYTHONUNBUFFERED": "1",
+            HOME_ENV: str(Home.root),
+        }
+        settings = [f"{name}={shlex.quote(value)}" for name, value in environment.items()]
+        return " ".join([*settings, shlex.join(tinker_command() + Runner.arguments(job))])
 
     @staticmethod
     def arguments(job):
@@ -194,29 +201,49 @@ class Runner:
 
 
 class Follower:
+    INTERRUPTED = 130
+
     def __init__(self, number):
-        self.number, self.output = number, f"output #{number}"
-        self.seen = len(Home.store().entries(self.output))
-        self.exit = 0
+        self.number = number
+        self.output = Home.job_path(number) / "output.log"
+        self.end = Home.job_path(number) / "ended"
+        self.seen = self.output.stat().st_size if self.output.exists() else 0
 
     def follow(self, hosting):
-        while True:
-            queue = Queue.ordered()
-            ran_out = self.show()
-            hosting = hosting or Runner.host()
-            if self.number not in queue and ran_out and not (hosting and queue):
-                return max(self.exit, 0)
-            time.sleep(QUEUE_LOOK_SECONDS)
+        try:
+            while not self.over():
+                self.show(whole_lines=True)
+                hosting = hosting or Runner.host()
+                time.sleep(QUEUE_LOOK_SECONDS)
+        except KeyboardInterrupt:
+            return self.INTERRUPTED
+        self.show(whole_lines=False)
+        return max(self.exit_code(), 0)
 
-    def show(self):
-        entries = [entry for _, entry in Home.store().entries(self.output)]
-        for entry in entries[self.seen :]:
-            if "line" in entry:
-                say.text(entry["line"])
-            if "exit" in entry:
-                self.exit = entry["exit"]
-        self.seen = len(entries)
-        return not entries or "exit" in entries[-1]
+    def over(self):
+        return self.number not in Queue.ordered() and (self.ended() or not self.job_runs())
+
+    def job_runs(self):
+        job = JOBS.get(self.number)
+        return job is not None and Runner.running(job)
+
+    def ended(self):
+        return self.end.exists()
+
+    def exit_code(self):
+        return int(self.end.read_text()) if self.ended() else 0
+
+    def show(self, whole_lines):
+        if not self.output.exists():
+            return
+        with open(self.output, "rb") as output:
+            output.seek(self.seen)
+            grown = output.read()
+        shown = grown[: grown.rfind(b"\n") + 1] if whole_lines else grown
+        self.seen += len(shown)
+        for line in shown.decode(errors="replace").splitlines():
+            say.text(line)
+        sys.stdout.flush()
 
 
 def job_view(number):
@@ -229,7 +256,7 @@ def job_view(number):
 def output_lines(job):
     if job["state"] == "archived":
         return ["Its output is gone."]
-    printed = output_entries(job["number"], "line")
+    printed = printed_lines(job["number"])
     if not printed:
         return ["It has printed nothing yet."]
     left_out = len(printed) - JOB_OUTPUT_LINES
@@ -237,14 +264,15 @@ def output_lines(job):
 
 
 def ending(number):
-    exits = output_entries(number, "exit")
-    if not exits:
+    end = Home.job_path(number) / "ended"
+    if not end.exists():
         return "It stopped before it ended."
-    return f"It ended with exit code {exits[-1]}."
+    return f"It ended with exit code {end.read_text().strip()}."
 
 
-def output_entries(number, key):
-    return [entry[key] for _, entry in Home.store().entries(f"output #{number}") if key in entry]
+def printed_lines(number):
+    output = Home.job_path(number) / "output.log"
+    return output.read_text(errors="replace").splitlines() if output.exists() else []
 
 
 def runner_job():
@@ -352,11 +380,7 @@ class Jobs:
         follower = Follower(job["number"])
         Queue.add_front(job["number"])
         hosting = Runner.host()
-        try:
-            return follower.follow(hosting)
-        except KeyboardInterrupt:
-            Runner.pause(hosting)
-            raise
+        return follower.follow(hosting)
 
     @classmethod
     def begin(cls, argv):
@@ -527,6 +551,7 @@ def archived(numbers, yes=False):
         Jobs.update(job["number"], state="archived", archived_from=job["state"])
         Home.store().drop_log(f"journal #{job['number']}")
         Home.store().drop_log(f"calls #{job['number']}")
+        shutil.rmtree(Home.job_path(job["number"]), ignore_errors=True)
     say.done(f"Archived {numbered}.")
 
 
@@ -623,6 +648,28 @@ def alive(pid, began=None):
 def began_at(pid):
     done = subprocess.run(["ps", "-o", "lstart=", "-p", str(pid)], capture_output=True, text=True)
     return done.stdout.strip()
+
+
+def launch(run_folder, place, lines, output_mode):
+    (run_folder / "run.sh").write_text("\n".join([f"cd {shlex.quote(place)}", *lines]) + "\n")
+    with open(run_folder / "output.log", output_mode) as output:
+        process = subprocess.Popen(
+            [LOGIN_SHELL, "-lc", launcher(run_folder)],
+            cwd=place,
+            stdin=subprocess.DEVNULL,
+            stdout=output,
+            stderr=subprocess.STDOUT,
+            start_new_session=True,
+        )
+    (run_folder / "state").write_text(json.dumps({"pid": process.pid, "began": began_at(process.pid)}))
+    return process.pid
+
+
+def launcher(run_folder):
+    script = shlex.quote(str(run_folder / "run.sh"))
+    ended = shlex.quote(str(run_folder / "ended"))
+    folder = shlex.quote(str(run_folder / "folder"))
+    return f"( trap 'pwd > {folder}' EXIT; . {script} ); echo $? > {ended}.new; mv {ended}.new {ended}"
 
 
 def interrupted(signum, frame):

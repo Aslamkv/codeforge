@@ -86,14 +86,12 @@ from tinkerkit.model.models import Cut, Models, QuickModel, ThinkLevels
 from tinkerkit.settings import EPISODE_GIST_CHARS, Config, Home
 from tinkerkit.shelf import Shelf
 from tinkerkit.skills import Skills
-from tinkerkit.store import Log
 
 
 @pytest.fixture(autouse=True)
 def runner_calls(monkeypatch):
     calls = []
     monkeypatch.setattr(Runner, "host", classmethod(lambda cls: calls.append("host") or True))
-    monkeypatch.setattr(Runner, "pause", classmethod(lambda cls, hosting: calls.append(("pause", hosting))))
     return calls
 
 
@@ -1725,7 +1723,7 @@ def test_ctrl_c_closes_the_chats_and_posts_no_status_after_the_first(desk, home_
 
 
 @pytest.mark.spec("JOB-9", "JOB-10")
-def test_the_conversation_hosts_the_runner_and_pauses_the_job_when_it_quits(
+def test_the_conversation_hosts_the_runner_and_leaves_the_job_going_when_it_quits(
     desk, home_store, monkeypatch, runner_calls
 ):
     goodbyes_handed(monkeypatch)
@@ -1737,7 +1735,7 @@ def test_the_conversation_hosts_the_runner_and_pauses_the_job_when_it_quits(
 
     monkeypatch.setattr(Desk, "listen_until_ended", interrupted)
     Desk([channel], Path.cwd()).run()
-    assert runner_calls == ["host", ("pause", True)]
+    assert runner_calls == ["host"]
     channel.claimed.close()
 
 
@@ -1839,11 +1837,18 @@ def test_every_status_is_sent_anew_the_one_before_taken_out(desk):
 
 def ended_idle_calibration(lines, state="finished", idle=True, code=0):
     job = jobs.Jobs.save(dict(jobs.Jobs.new(["model", "calibrate", "fresh"]), state=state, idle=idle))
-    output = Log(Home.store(), f"output #{job['number']}")
-    for line in lines:
-        output.add({"line": line})
-    output.add({"exit": code})
+    printed(job["number"], *lines)
+    exited(job["number"], code)
     return job
+
+
+def printed(number, *lines):
+    with open(Home.job_folder(number) / "output.log", "a") as output:
+        output.write("".join(f"{line}\n" for line in lines))
+
+
+def exited(number, code):
+    (Home.job_folder(number) / "ended").write_text(f"{code}\n")
 
 
 def unstamped(texts):
@@ -3620,7 +3625,7 @@ def test_a_followed_job_message_is_edited_when_its_view_changes(in_job, home_sto
     follower, entered = following(desk, channel), channel.newest["1"]
     before = len(channel.log)
     assert follower.step() and len(channel.log) == before
-    Log(home_store, "output #4").add({"line": "reading the rust book"})
+    printed(4, "reading the rust book")
     assert follower.step()
     edited = [entry for entry in channel.log[before:] if entry[0] == "edit"]
     assert [entry[2] for entry in edited] == [entered]
@@ -3633,8 +3638,8 @@ def test_a_followed_job_leaving_the_queue_shows_how_it_ended_and_leaves(in_job, 
     desk, channel, _ = in_job
     follower, sent = following(desk, channel), len([entry for entry in channel.log if entry[0] == "send"])
     put_job(home_store, 4, title="learn rust", state="finished")
-    Log(home_store, "output #4").add({"line": "reading the rust book"})
-    Log(home_store, "output #4").add({"exit": 0})
+    printed(4, "reading the rust book")
+    exited(4, 0)
     dequeued(4)
     assert not follower.step()
     assert desk.inside == {} and ("inside", "1", None, None) in channel.log
@@ -3658,7 +3663,7 @@ def test_a_followed_job_leaving_the_queue_without_an_exit_says_it_stopped(in_job
 def test_a_followed_job_leaving_the_queue_still_running_reads_ended(in_job, home_store):
     desk, channel, _ = in_job
     follower = following(desk, channel)
-    Log(home_store, "output #4").add({"exit": 1})
+    exited(4, 1)
     dequeued(4)
     assert not follower.step()
     ended = channel.texts()[-1]

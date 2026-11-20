@@ -13,7 +13,7 @@ lazy import webbrowser
 lazy from pathlib import Path
 
 from . import desk, logger, shelf
-from .commands import BY_NAME, COMMANDS, GROUPS, kind_of, refs, taught_command
+from .commands import BY_NAME, COMMANDS, GROUPS, refs, taught_command
 from .jobs import (
     STATES,
     Jobs,
@@ -137,8 +137,6 @@ def run(args, started_at):
     if args.reset:
         return Home.reset(args.yes)
     open_home()
-    if Cli.works_for_hours(args):
-        Home.keep_awake()
     if Commands(args, started_at).run():
         return
     ProjectRun(args, started_at).execute()
@@ -649,10 +647,6 @@ class Cli:
     @staticmethod
     def finds_its_folder(command):
         return f"{command} @PROJECT finds the project's folder itself: remove --workdir (or give --workdir and no @PROJECT)"
-
-    @staticmethod
-    def works_for_hours(args):
-        return kind_of([args.command, *(args.model or [])]) == "job"
 
     @staticmethod
     def named(argv):

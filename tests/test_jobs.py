@@ -1,11 +1,14 @@
 import datetime
+import json
 import os
 import signal
+import sys
 import threading
 import time
 
 import pytest
 from conftest import add_back
+from conftest import tinker_runs as conftest_runs
 from test_console import Recorder
 from test_reports import everyone
 
@@ -35,7 +38,6 @@ from tinkerkit.knowledge.curriculum import SlotLearner
 from tinkerkit.knowledge.library import Learner, Researcher
 from tinkerkit.model.models import Ollama
 from tinkerkit.settings import DREAM_IDLE_SECONDS, JOB_START_TRIES, JOB_STOP_SIGNAL, Config, Home
-from tinkerkit.store import Log
 
 DEAD_PID = 999999999
 
@@ -348,11 +350,10 @@ def test_tinker_jobs_takes_a_state_and_a_page():
 
 
 def print_lines(number, count, exit_code=None):
-    output = Log(Home.store(), f"output #{number}")
-    for line in range(1, count + 1):
-        output.add({"line": f"line {line}"})
+    folder = Home.job_folder(number)
+    (folder / "output.log").write_text("".join(f"line {line}\n" for line in range(1, count + 1)))
     if exit_code is not None:
-        output.add({"exit": exit_code})
+        (folder / "ended").write_text(f"{exit_code}\n")
 
 
 @pytest.mark.spec("JOB-6")
@@ -545,6 +546,18 @@ def test_a_research_job_frames_its_topic_on_the_day_the_job_started(home_store, 
     with Jobs.run_here(Jobs.arguments(["resume", "#1"])):
         Researcher(Learner(None, None, None)).frame("go", None)
     assert next(part for part in given if part.title == "Today").text == "2026-01-02"
+
+
+@pytest.mark.spec("JOB-8")
+def test_a_new_front_pushes_back_a_head_that_never_started_without_a_signal(home_store):
+    put_job(home_store, 1, state="queued")
+    never_started = home_store.get("jobs", "1")
+    del never_started["pid"]
+    home_store.put("jobs", "1", never_started)
+    put_job(home_store, 2)
+    add_back(1)
+    Queue.add_front(2)
+    assert Queue.ordered() == [2, 1]
 
 
 @pytest.mark.spec("JOB-8")
@@ -820,28 +833,25 @@ def test_a_job_keeps_its_model_calls_in_its_own_log_until_it_is_archived(home_st
     assert home_store.entries("calls #1") == []
 
 
-REAL_POPEN = jobs.subprocess.Popen
+@pytest.mark.spec("JOB-11")
+def test_archiving_a_job_deletes_its_job_folder(home_store):
+    keep_jobs(home_store, ["finished", "stopped"])
+    print_lines(1, 3, exit_code=0)
+    archived([1, 2], yes=True)
+    assert not (Home.root / "jobs" / "1").exists() and not (Home.root / "jobs" / "2").exists()
+
+
+@pytest.mark.spec("JOB-6", "JOB-11")
+def test_reading_an_archived_job_leaves_its_folder_gone(home_store):
+    keep_jobs(home_store, ["finished"])
+    print_lines(1, 3, exit_code=0)
+    archived([1], yes=True)
+    assert jobs.printed_lines(1) == [] and jobs.ending(1) == "It stopped before it ended."
+    assert not Runner.running(JOBS.get(1)) and not (Home.root / "jobs" / "1").exists()
 
 
 def finished_head():
     Queue.remove(Queue.head())
-
-
-class Started:
-    def __init__(self, started, lines, during=finished_head):
-        self.started, self.lines, self.during, self.folders, self.code = started, lines, during, [], 0
-
-    def __call__(self, command, **options):
-        if command[:2] != jobs.tinker_command():
-            return REAL_POPEN(command, **options)
-        self.started.append((command, options["env"]["TINKER_RUNNER_JOB"]))
-        self.folders.append(options["cwd"])
-        self.stdout = iter(self.lines)
-        return self
-
-    def wait(self):
-        self.during()
-        return self.code
 
 
 @pytest.mark.spec("JOB-9")
@@ -855,60 +865,61 @@ def test_one_runner_holds_the_home_and_one_whose_holder_is_gone_is_taken_over(ho
 
 
 @pytest.mark.spec("JOB-9")
-def test_the_runner_starts_each_head_as_its_own_tinker_and_keeps_its_output(home_store, monkeypatch):
-    started = []
-    monkeypatch.setattr(jobs.subprocess, "Popen", Started(started, ["one\n", "two\n"]))
+def test_the_runner_starts_the_head_detached_and_returns_at_once(home_store, runner):
     put_job(home_store, 1, pid=None)
     put_job(home_store, 2, arguments=["research", "go"])
     add_back(1)
     add_back(2)
     Runner.go_through()
-    assert [(command[2:], job) for command, job in started] == [
-        (["learn", "go"], "1"),
-        (["resume", "#2"], "2"),
-    ]
-    assert started[0][0][:2] == jobs.tinker_command()
-    assert [entry.get("line") for _, entry in home_store.entries("output #1")] == ["one", "two", None]
-    assert Queue.ordered() == []
+    first_start = (Home.job_folder(1) / "state").read_text()
+    assert not (Home.job_folder(2) / "state").exists()
+    Runner.go_through()
+    assert (Home.job_folder(1) / "state").read_text() == first_start
+    finished_head()
+    dead_run(1, runner)
+    Runner.go_through()
+    dead_run(2, runner)
+    assert run_output(1) == "['learn', 'go']\n" and run_output(2) == "['resume', '#2']\n"
+    assert "start_failures" not in JOBS.get(1)
 
 
 @pytest.mark.spec("JOB-9")
-def test_the_runner_drops_a_head_with_no_job_and_starts_a_job_in_its_folder(
-    home_store, monkeypatch, tmp_path
-):
-    started = []
-    monkeypatch.setattr(jobs.subprocess, "Popen", child := Started(started, []))
+def test_a_start_deletes_the_ending_of_the_last_start(home_store, monkeypatch):
+    monkeypatch.setattr(jobs, "launch", lambda *arguments: None)
+    put_job(home_store, 1, pid=None)
+    print_lines(1, 2, exit_code=0)
+    folder = Runner.detach(JOBS.get(1))
+    assert not (folder / "ended").exists() and (folder / "output.log").read_text() == "line 1\nline 2\n"
+
+
+@pytest.mark.spec("JOB-9")
+def test_the_runner_drops_a_head_with_no_job_and_starts_a_job_in_its_folder(home_store, runner, tmp_path):
     put_job(home_store, 2, pid=None, folder=str(tmp_path))
     add_back(1)
     add_back(2)
     Runner.go_through()
-    assert [job for _, job in started] == ["2"] and child.folders == [str(tmp_path)] and Queue.ordered() == []
+    assert Queue.ordered() == [2]
+    assert f"cd {tmp_path}" in (Home.job_folder(2) / "run.sh").read_text()
 
 
 @pytest.mark.spec("JOB-9")
-def test_a_head_pushed_back_stays_queued_and_the_new_head_runs_next(home_store, monkeypatch):
-    started = []
-    monkeypatch.setattr(jobs, "signal_job", lambda job: None)
-
-    def pushed_back_once_it_ran():
-        if len(started) == 1:
-            Jobs.update(1, pid=DEAD_PID)
-            Queue.add_front(2)
-        else:
-            finished_head()
-
-    monkeypatch.setattr(jobs.subprocess, "Popen", Started(started, [], pushed_back_once_it_ran))
-    put_job(home_store, 1, pid=None)
+def test_a_head_pushed_back_stays_queued_and_the_new_head_runs_next(home_store, runner):
+    put_job(home_store, 1, pid=None, state="queued")
     put_job(home_store, 2, pid=None, arguments=["learn", "rust"])
     add_back(1)
     Runner.go_through()
-    assert [command[2:] for command, _ in started] == [["learn", "go"], ["learn", "rust"], ["resume", "#1"]]
+    Queue.add_front(2)
+    dead_run(1, runner)
+    Runner.go_through()
+    dead_run(2, runner)
+    assert run_output(2) == "['learn', 'rust']\n" and Queue.ordered() == [2, 1]
+    assert JOBS.get(1).get("start_failures", 0) == 0 and JOBS.get(1)["state"] == "queued"
 
 
 @pytest.mark.spec("JOB-9")
 def test_the_runner_waits_while_the_head_runs_in_a_process_of_its_own(home_store, monkeypatch):
     started = []
-    monkeypatch.setattr(jobs.subprocess, "Popen", Started(started, []))
+    monkeypatch.setattr(jobs, "launch", lambda *arguments: started.append(arguments))
     put_job(home_store, 1, pid=os.getpid(), pid_began=began_at(os.getpid()))
     add_back(1)
     Runner.go_through()
@@ -1028,12 +1039,29 @@ def test_going_through_an_emptied_queue_starts_the_idle_clock(home_store, runner
     assert len(queued_dreams()) == 1
 
 
+def run_output(number):
+    return (Home.job_folder(number) / "output.log").read_text()
+
+
+def dead_run(number, gate, seconds=10):
+    gate.touch()
+    deadline = time.monotonic() + seconds
+    while Runner.running(JOBS.get(number)):
+        assert time.monotonic() < deadline
+        time.sleep(0.02)
+
+
 @pytest.fixture
-def runner(monkeypatch):
-    monkeypatch.setattr(Runner, "paused", False)
+def runner(monkeypatch, tmp_path):
+    gate = tmp_path / "gate"
+    shows = "import sys, pathlib, time\n"
+    shows += f"while not pathlib.Path({str(gate)!r}).exists(): time.sleep(0.02)\n"
+    shows += "print(sys.argv[1:])"
+    conftest_runs(monkeypatch, "-c", shows)
+    monkeypatch.setattr(Runner, "last_started", None)
     monkeypatch.setattr(jobs, "signal_job", lambda job: None)
-    monkeypatch.setattr(jobs.subprocess, "Popen", child := Started([], ["one\n", "two\n"]))
-    return child
+    yield gate
+    gate.touch()
 
 
 @pytest.mark.spec("JOB-9")
@@ -1042,54 +1070,86 @@ def test_the_runner_gives_up_on_a_head_that_keeps_ending_while_it_is_the_head(ho
     put_job(home_store, 2, state="queued", pid=None, arguments=["learn", "rust"])
     add_back(1)
     add_back(2)
-    runner.during = lambda: None if len(runner.started) <= JOB_START_TRIES else finished_head()
+    for _ in range(JOB_START_TRIES):
+        Runner.go_through()
+        dead_run(1, runner)
     Runner.go_through()
-    assert [job for _, job in runner.started] == ["1"] * JOB_START_TRIES + ["2"]
     assert JOBS.get(1)["state"] == "stopped" and JOBS.get(1)["start_failures"] == 0
-    assert Queue.ordered() == []
-    lines = [entry.get("line") for _, entry in home_store.entries("output #1")]
-    assert lines[-2] == f"gave up after {JOB_START_TRIES} failed starts in a row; resume #1 tries it again"
-
-
-@pytest.mark.spec("JOB-9")
-def test_the_output_of_a_given_up_head_ends_with_its_exit_so_its_follower_stops(home_store, runner):
-    runner.during = lambda: None
-    put_job(home_store, 1, state="queued", pid=None, start_failures=JOB_START_TRIES - 1)
-    add_back(1)
-    follower = jobs.Follower(1)
-    Runner.run_job(1)
-    entries = [entry for _, entry in home_store.entries("output #1")]
-    assert "exit" in entries[-1] and entries[-2]["line"].startswith("gave up after")
-    assert follower.show()
+    assert Queue.ordered() == [2] and (Home.job_folder(2) / "state").exists()
+    assert run_output(1).splitlines()[-1] == (
+        f"gave up after {JOB_START_TRIES} failed starts in a row; resume #1 tries it again"
+    )
 
 
 @pytest.mark.spec("JOB-9")
 def test_a_head_that_leaves_the_queue_clears_its_failed_starts(home_store, runner):
     put_job(home_store, 1, state="queued", pid=None, start_failures=JOB_START_TRIES - 1)
     add_back(1)
-    Runner.run_job(1)
+    Runner.go_through()
+    finished_head()
+    dead_run(1, runner)
+    Runner.go_through()
     assert JOBS.get(1)["start_failures"] == 0 and JOBS.get(1)["state"] == "queued"
 
 
 @pytest.mark.spec("JOB-9")
-def test_a_head_ending_while_the_runner_is_paused_is_no_failed_start(home_store, runner, monkeypatch):
-    def paused_meanwhile():
-        monkeypatch.setattr(Runner, "paused", True)
-
-    runner.during = paused_meanwhile
-    put_job(home_store, 1, state="queued", pid=None, start_failures=JOB_START_TRIES - 1)
+def test_a_start_by_an_earlier_runner_is_no_failed_start(home_store, runner):
+    put_job(home_store, 1, state="queued", pid=None, start_failures=1)
     add_back(1)
-    Runner.run_job(1)
-    assert JOBS.get(1)["start_failures"] == JOB_START_TRIES - 1 and Queue.ordered() == [1]
+    Runner.go_through()
+    dead_run(1, runner)
+    Runner.last_started = None
+    Runner.go_through()
+    assert JOBS.get(1)["start_failures"] == 1 and Runner.last_started == 1
+
+
+class StandInJob:
+    def __init__(self):
+        self.started, self.folders, self.code = [], [], 0
+
+    def detach(self, job):
+        self.started.append(str(job["number"]))
+        self.folders.append(job.get("folder"))
+        self.restart(job["number"])
+        self.run_job(job["number"])
+        return Home.job_folder(job["number"])
+
+    @staticmethod
+    def restart(number):
+        (Home.job_folder(number) / "ended").unlink(missing_ok=True)
+
+    def run_job(self, number):
+        folder = Home.job_folder(number)
+        with open(folder / "output.log", "a") as output:
+            output.write("one\ntwo\n")
+        (folder / "ended").write_text(f"{self.code}\n")
+        Queue.remove(number)
+
+
+@pytest.fixture
+def stand_in_job(monkeypatch):
+    job = StandInJob()
+    monkeypatch.setattr(Runner, "last_started", None)
+    monkeypatch.setattr(Runner, "detach", staticmethod(job.detach))
+    monkeypatch.setattr(jobs, "signal_job", lambda job: None)
+    return job
+
+
+def go_through_queue():
+    while Runner.startable() is not None:
+        Runner.go_through()
+
+
+def hosting_go_through(cls):
+    threading.Thread(target=go_through_queue).start()
+    return True
 
 
 @pytest.mark.spec("JOB-10")
-def test_a_job_command_hosting_the_runner_follows_its_job_then_the_queue(
-    home_store, runner, monkeypatch, capsys, tmp_path
+def test_a_job_command_hosting_the_runner_follows_only_its_own_job(
+    home_store, stand_in_job, monkeypatch, capsys, tmp_path
 ):
-    monkeypatch.setattr(
-        Runner, "host", classmethod(lambda cls: threading.Thread(target=Runner.go_through).start() or True)
-    )
+    monkeypatch.setattr(Runner, "host", classmethod(hosting_go_through))
     put_job(home_store, 1, state="queued", pid=None)
     home_store.put("job numbers", "last", 1)
     add_back(1)
@@ -1097,19 +1157,69 @@ def test_a_job_command_hosting_the_runner_follows_its_job_then_the_queue(
     with pytest.raises(SystemExit) as ended, Jobs.running(["learn", "rust"]):
         raise AssertionError("a job command runs no job itself")
     assert ended.value.code == 0 and capsys.readouterr().out == "one\ntwo\n"
-    assert [job for _, job in runner.started] == ["2", "1"] and runner.folders[0] == str(tmp_path)
-    assert Queue.ordered() == [] and Jobs.get(2)["title"] == "learn rust"
+    assert stand_in_job.started[0] == "2" and stand_in_job.folders[0] == str(tmp_path)
+    assert 2 not in Queue.ordered() and Jobs.get(2)["title"] == "learn rust"
+
+
+@pytest.mark.spec("JOB-10")
+def test_a_follower_shows_only_output_written_after_it_began(home_store, stand_in_job, monkeypatch, capsys):
+    monkeypatch.setattr(Runner, "host", classmethod(lambda cls: False))
+    put_job(home_store, 1, state="queued", pid=None)
+    add_back(1)
+    stand_in_job.run_job(1)
+    add_back(1)
+    stand_in_job.restart(1)
+    follower = jobs.Follower(1)
+    stand_in_job.code = 3
+    capsys.readouterr()
+    threading.Timer(0.05, stand_in_job.run_job, args=(1,)).start()
+    assert follower.follow(hosting=False) == 3 and capsys.readouterr().out == "one\ntwo\n"
+
+
+class BufferedOutput:
+    def __init__(self):
+        self.pending, self.flushed = "", ""
+
+    def write(self, text):
+        self.pending += text
+
+    def flush(self):
+        self.flushed, self.pending = self.flushed + self.pending, ""
+
+
+@pytest.mark.spec("JOB-10")
+def test_a_follower_flushes_what_it_shows_to_a_buffered_output(home_store, stand_in_job, monkeypatch):
+    put_job(home_store, 1, state="queued", pid=None)
+    add_back(1)
+    follower = jobs.Follower(1)
+    stand_in_job.run_job(1)
+    output = BufferedOutput()
+    monkeypatch.setattr(sys, "stdout", output)
+    follower.show(whole_lines=True)
+    monkeypatch.undo()
+    assert output.flushed == "one\ntwo\n"
+
+
+@pytest.mark.spec("JOB-10")
+def test_ctrl_c_in_a_follower_ends_it_and_leaves_the_job_queued(home_store, stand_in_job, monkeypatch):
+    def ctrl_c(seconds):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(Runner, "host", classmethod(lambda cls: False))
+    monkeypatch.setattr(jobs.time, "sleep", ctrl_c)
+    put_job(home_store, 1, state="queued", pid=None)
+    add_back(1)
+    assert jobs.Follower(1).follow(hosting=False) == jobs.Follower.INTERRUPTED
+    assert Queue.ordered() == [1] and stand_in_job.started == []
 
 
 @pytest.mark.spec("JOB-10")
 @pytest.mark.parametrize(("code", "ended_with"), [(2, 2), (0, 0), (-15, 0)])
 def test_a_job_command_ends_with_its_jobs_exit_code_when_above_0(
-    home_store, runner, monkeypatch, tmp_path, code, ended_with
+    home_store, stand_in_job, monkeypatch, tmp_path, code, ended_with
 ):
-    runner.code = code
-    monkeypatch.setattr(
-        Runner, "host", classmethod(lambda cls: threading.Thread(target=Runner.go_through).start() or True)
-    )
+    stand_in_job.code = code
+    monkeypatch.setattr(Runner, "host", classmethod(hosting_go_through))
     monkeypatch.chdir(tmp_path)
     with pytest.raises(SystemExit) as ended, Jobs.running(["learn", "rust"]):
         raise AssertionError("a job command runs no job itself")
@@ -1119,22 +1229,20 @@ def test_a_job_command_ends_with_its_jobs_exit_code_when_above_0(
 @pytest.mark.spec("JOB-10")
 @pytest.mark.parametrize(("code", "ended_with"), [(2, 2), (0, 0), (-15, 0)])
 def test_a_follower_returns_its_jobs_exit_code_when_above_0(
-    home_store, runner, monkeypatch, code, ended_with
+    home_store, stand_in_job, monkeypatch, code, ended_with
 ):
-    runner.code = code
+    stand_in_job.code = code
     monkeypatch.setattr(Runner, "host", classmethod(lambda cls: False))
     put_job(home_store, 1, state="queued", pid=None)
     add_back(1)
     follower = jobs.Follower(1)
-    Runner.run_job(1)
+    stand_in_job.run_job(1)
     assert follower.follow(hosting=False) == ended_with
 
 
 @pytest.mark.spec("JOB-10")
-def test_the_job_a_process_follows_is_found_by_that_process(home_store, runner, monkeypatch, tmp_path):
-    monkeypatch.setattr(
-        Runner, "host", classmethod(lambda cls: threading.Thread(target=Runner.go_through).start() or True)
-    )
+def test_the_job_a_process_follows_is_found_by_that_process(home_store, stand_in_job, monkeypatch, tmp_path):
+    monkeypatch.setattr(Runner, "host", classmethod(hosting_go_through))
     monkeypatch.chdir(tmp_path)
     with pytest.raises(SystemExit), Jobs.running(["learn", "rust"]):
         raise AssertionError("a job command runs no job itself")
@@ -1142,12 +1250,12 @@ def test_the_job_a_process_follows_is_found_by_that_process(home_store, runner, 
 
 
 @pytest.mark.spec("JOB-10")
-def test_a_job_command_ends_once_its_job_leaves_the_queue(home_store, runner, monkeypatch, capsys):
+def test_a_job_command_ends_once_its_job_leaves_the_queue(home_store, stand_in_job, monkeypatch, capsys):
     asked_to_host = []
 
     def another_tinker_hosts(cls):
         if not asked_to_host:
-            threading.Thread(target=Runner.run_job, args=(Queue.head(),)).start()
+            threading.Thread(target=stand_in_job.run_job, args=(Queue.head(),)).start()
         asked_to_host.append(True)
         return False
 
@@ -1158,35 +1266,6 @@ def test_a_job_command_ends_once_its_job_leaves_the_queue(home_store, runner, mo
     with pytest.raises(SystemExit), Jobs.running(["learn", "rust"]):
         pass
     assert capsys.readouterr().out == "one\ntwo\n" and Queue.ordered() == [1]
-
-
-@pytest.mark.spec("JOB-10")
-def test_ctrl_c_in_a_job_command_pauses_the_job_that_runs(home_store, runner, told, monkeypatch):
-    monkeypatch.setattr(Runner, "host", classmethod(lambda cls: True))
-
-    def ctrl_c(seconds):
-        Jobs.update(1, pid=os.getpid(), pid_began=began_at(os.getpid()))
-        raise KeyboardInterrupt
-
-    monkeypatch.setattr(jobs.time, "sleep", ctrl_c)
-    with pytest.raises(KeyboardInterrupt), Jobs.running(["learn", "rust"]):
-        pass
-    assert told == [1] and Runner.paused and Queue.ordered() == [1] and Jobs.get(1)["state"] == "running"
-    Runner.go_through()
-    assert runner.started == []
-
-
-@pytest.mark.spec("JOB-10")
-@pytest.mark.parametrize("hosting", [True, False])
-def test_pausing_signals_the_live_head_and_stops_the_runner_only_where_it_is_hosted(
-    home_store, runner, told, hosting
-):
-    put_job(home_store, 1, state="running", pid=os.getpid(), pid_began=began_at(os.getpid()))
-    put_job(home_store, 2, state="queued", pid=None)
-    add_back(1)
-    add_back(2)
-    Runner.pause(hosting)
-    assert told == [1] and Runner.paused is hosting and Queue.ordered() == [1, 2]
 
 
 @pytest.mark.spec("SET-1")
@@ -1202,3 +1281,56 @@ def test_a_started_tinker_only_has_the_runner_job_it_is_given(tinker_home, monke
     monkeypatch.setenv(RUNNER_JOB_ENV, "7")
     assert RUNNER_JOB_ENV not in tinker_environment()
     assert tinker_environment(**{RUNNER_JOB_ENV: "3"})[RUNNER_JOB_ENV] == "3"
+
+
+def ended_run(folder, seconds=10):
+    deadline = time.monotonic() + seconds
+    while not (folder / "ended").exists():
+        assert time.monotonic() < deadline
+        time.sleep(0.02)
+    return (folder / "ended").read_text().strip()
+
+
+@pytest.mark.spec("JOB-9")
+def test_a_job_folder_is_the_same_folder_on_every_call(tinker_home):
+    folder = Home.job_folder(3)
+    assert folder == tinker_home / "jobs" / "3" and folder.is_dir()
+    assert Home.job_folder(3) == folder
+
+
+@pytest.mark.spec("JOB-9")
+def test_a_detached_job_returns_at_once_and_runs_its_arguments_as_that_job(
+    tinker_home, tmp_path, monkeypatch
+):
+    gate = tmp_path / "gate"
+    shows = "import os, sys, pathlib, time\n"
+    shows += f"while not pathlib.Path({str(gate)!r}).exists(): time.sleep(0.02)\n"
+    shows += "print(os.environ['TINKER_RUNNER_JOB'], os.environ['TINKER_HOME'], os.getcwd(), sys.argv[1:])"
+    conftest_runs(monkeypatch, "-c", shows)
+    work = tmp_path / "it's work"
+    work.mkdir()
+    folder = Runner.detach({"number": 4, "arguments": ["build", "a b"], "folder": str(work)})
+    assert folder == Home.job_folder(4)
+    assert "pid" in json_of(folder / "state") and not (folder / "ended").exists()
+    assert "RUNNER_JOB=4" in (folder / "run.sh").read_text()
+    gate.touch()
+    assert ended_run(folder) == "0"
+    assert (folder / "output.log").read_text() == f"4 {tinker_home} {work.resolve()} ['build', 'a b']\n"
+
+
+@pytest.mark.spec("JOB-9")
+def test_a_job_started_again_resumes_appends_its_output_and_rewrites_its_end(tinker_home, monkeypatch):
+    conftest_runs(
+        monkeypatch, "-c", "import sys; print(sys.argv[1:]); sys.exit(3 if 'resume' in sys.argv else 0)"
+    )
+    folder = Runner.detach({"number": 5, "arguments": ["practice"]})
+    assert ended_run(folder) == "0"
+    (folder / "ended").unlink()
+    assert Runner.detach({"number": 5, "arguments": ["practice"], "pid": 1}) == folder
+    assert ended_run(folder) == "3"
+    assert (folder / "output.log").read_text() == "['practice']\n['resume', '#5']\n"
+    assert f"cd {tinker_home}" in (folder / "run.sh").read_text()
+
+
+def json_of(path):
+    return json.loads(path.read_text())

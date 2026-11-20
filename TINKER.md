@@ -613,8 +613,10 @@ Everything that takes a while is a job: a task (and `restart`, `confirm`, `amend
 
 Jobs wait in one queue, and only the first runs. Start another job, or chat with Tinker, and it goes to the front:
 the running one saves itself and waits second, and you are answered at once. When a job ends, the next goes on
-where it was. The queue runs while a Tinker is open (a chat, or a job command in a terminal), and again whenever
-Tinker starts. Ctrl-C on a job command, or quitting a chat, pauses the running job; it stays first in the queue.
+where it was. A job runs on its own, its output kept in the home's `jobs/` folder, so Ctrl-C on a job command, or
+quitting a chat, leaves it running; only `tinker stop` stops it. The next job starts while a Tinker is open (a
+chat, or a job command in a terminal, which ends once its own job leaves the queue), and again whenever Tinker
+starts.
 
 List them, newest first, 10 to a page:
 
@@ -664,7 +666,7 @@ tinker resume            # the job stopped last (with none stopped, this folder'
 `tinker confirm` is not a job's resume: it always builds the plan that waits in its folder.
 
 A job that was killed (or the computer restarted) stays in the queue and goes on when its turn comes. A
-finished job's journal is deleted. While a job runs, the computer stays awake. In a chat, the same commands work
+finished job's journal is deleted. In a chat, the same commands work
 with a `/`: `/jobs`, `/stop #3`, `/resume #3`, `/queue list`, `/queue stop all`.
 
 An instruction's run ([Instruct](#instruct-)) is not a job and never waits in the queue, but `/jobs` lists the
