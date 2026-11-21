@@ -35,6 +35,7 @@ from .chat.shell import (
     CANT_BE_UNDONE,
     CHAT_COMMAND_OUTPUT_SHOWN_CHARS,
     Checked,
+    InstructionReply,
     Question,
     Shell,
     first_words,
@@ -77,7 +78,16 @@ from .jobs import (
 from .memory.memories import Memories, Scratchpad
 from .memory.routes import CANCEL as CHAT_CANCEL
 from .memory.routes import CONFIRM as CHAT_CONFIRM
-from .memory.routes import INSTRUCT, NoRoutes, RouteFeedback, Routes, mask
+from .memory.routes import (
+    INSTRUCT,
+    PROPOSAL_ANSWERS,
+    ChatEpisodes,
+    NoRoutes,
+    RouteFeedback,
+    Routes,
+    mask,
+)
+from .memory.routes import LEAVE as CHAT_LEAVE
 from .skills import Skills
 lazy from .chat.ledger import DONE_NOTE_KEPT_SECONDS, Ledger
 lazy from .instructions import Instructions, Run
@@ -87,6 +97,8 @@ lazy from .model.models import Cut, Models, Ollama, OllamaError, system_turn
 lazy from .prompts import ROUTE_SEEDS, Part, Prompts
 lazy from .ranking import Embeddings, Retriever, traits_part
 lazy from .settings import (
+    CANCEL_WORDS,
+    CONFIRM_WORDS,
     EPISODE_GIST_CHARS,
     EXERCISE_FOLDER,
     JOB_STOP_SIGNAL,
@@ -132,7 +144,6 @@ COMMANDS_ASKING_FOR_WORDS = tuple(
 ) + ("instruct",)
 CHAT_APP_START = "/start"
 CHAT_FRESH = "/fresh"
-CHAT_LEAVE = "/leave"
 CHAT_SKIP = "/skip"
 RUN_BUTTON = "✅ Run"
 YES_BUTTON = "✅ Yes"
@@ -390,7 +401,7 @@ class InstructionShell(Shell):
     def run(self, channel, chat, proposed):
         line = proposed["line"]
         try:
-            run_folder = Run.start(self.number, line, str(self.folder), proposed["touches"])
+            run_folder = Run.start(self.number, line, str(self.folder), self.backed_up(proposed))
         except OSError as error:
             channel.show(
                 chat,
@@ -398,19 +409,67 @@ class InstructionShell(Shell):
                 md(t"❌ **Could not start** {line:code}: {error.strerror}"),
                 done=True,
             )
+            self.not_started()
             return
-        Instructions.ran(self.number, run_folder, chat, proposed)
+        Instructions.ran(self.number, run_folder, chat, self.carried(proposed))
         channel.show(chat, proposed["shown"], f"▶️ **Running** `{line}` …", done=True)
 
+    @staticmethod
+    def backed_up(proposed):
+        return () if proposed.get("at_once") else proposed["touches"]
 
-class RoutedInstructionShell(InstructionShell):
-    def __init__(self, talk, questions, number, unrouted):
+    def carried(self, proposed):
+        return proposed
+
+    def not_started(self):
+        pass
+
+
+class FirstInstructionShell(InstructionShell):
+    def __init__(self, talk, questions, number, failed, episode_ids):
         super().__init__(talk, questions, number)
+        self.failed = failed
+        self.episode_ids = episode_ids
+        self.once_shown = do_nothing
+
+    def carried(self, proposed):
+        return proposed | {"episodes": self.episode_ids()}
+
+    def drop(self, channel, chat, proposed):
+        super().drop(channel, chat, proposed)
+        self.failed()
+
+    def gave_no_line(self, channel, chat):
+        super().gave_no_line(channel, chat)
+        self.once_shown = self.failed
+
+    def proposal_shown(self, channel, chat, ids):
+        super().proposal_shown(channel, chat, ids)
+        once_shown, self.once_shown = self.once_shown, do_nothing
+        once_shown()
+
+    def not_started(self):
+        self.failed()
+
+
+class RoutedInstructionShell(FirstInstructionShell):
+    def __init__(self, talk, questions, number, failed, episode_ids, unrouted):
+        super().__init__(talk, questions, number, failed, episode_ids)
         self.unrouted = unrouted
+
+    def confirm_question(self, channel, chat, proposed):
+        return super().confirm_question(channel, chat, proposed)._replace(leaves=True)
 
     def drop(self, channel, chat, proposed):
         super().drop(channel, chat, proposed)
         self.unrouted()
+
+    def keep_episode(self, *answered):
+        pass
+
+
+def do_nothing():
+    pass
 
 
 class UndoShell(InstructionShell):
@@ -727,6 +786,8 @@ class Desk:
         self.routes = Routes(deletes=line_deletes)
         self.routes.seed(seed_routes())
         self.feedback = RouteFeedback(self.routes, lambda: route_names(self.channels), quiet_line)
+        self.episodes = ChatEpisodes(lambda: route_names(self.channels))
+        self.exits = threading.local()
         self.lock, self.talk = (
             threading.Lock(),
             Talk(
@@ -735,6 +796,7 @@ class Desk:
                 routes=self.routes,
                 known=lambda: route_names(self.channels),
                 feedback=self.feedback,
+                episodes=self.episodes,
             ),
         )
         self.waiting_plan = NoWaitingPlan()
@@ -870,6 +932,9 @@ class Desk:
             self.say_in_chat(run["chat"], self.run_ending(run["line"], end))
             Instructions.said(number, "output", end.output)
             episode = Shell.kept(run["chat"], run, end.code, end.output)
+            if end.code != 0:
+                for episode_id in run.get("episodes", []):
+                    Scratchpad.fail(episode_id)
             if end.code == 0 and "undoes" not in run and not run.get("at_once"):
                 keep_memory("tool", run["corrected"] or run["asked"], run["line"], [episode["id"]])
             Instructions.posted(number, run["folder"])
@@ -1078,9 +1143,17 @@ class Desk:
         self.handled(channel, message, asked)
         self.left_if_gone(channel, message.chat)
 
+    def heard(self, message):
+        now = datetime.datetime.now()
+        if not (self.feedback.proposes(message.chat) or message.text.split() in PROPOSAL_ANSWERS):
+            self.episodes.heard(message.chat, message.text, now)
+        self.feedback.heard(message.chat, message.text, now)
+
     def handled(self, channel, message, asked):
+        message = self.answered_in_words(channel, message)
+        self.leave_if_left_by(channel, message)
         if asked is None:
-            self.feedback.heard(message.chat, message.text, datetime.datetime.now())
+            self.heard(message)
         answers_a_question = bool(self.questions.waiting(channel, message.chat))
         said = self.as_said(channel, self.with_words_wanted(channel, message))
         cancelled = said.text.split() == [CHAT_CANCEL] and bool(self.questions.waiting(channel, said.chat))
@@ -1131,9 +1204,14 @@ class Desk:
             self.instruct_routed(channel, message)
             return
         mode_before = self.inside.get(message.chat)
+        self.exits.nonzero = False
         reply = self.answer(message, channel)
         if not reply:
             return
+        if isinstance(message, RoutedMessage):
+            self.routed_line_answered(message, reply)
+        if self.exits.nonzero and (asked is not None or isinstance(message, RoutedMessage)):
+            self.routed_line_failed(message.chat)
         if asked is not None:
             sent = channel.send(message.chat, self.told(channel, message, reply, asked))
         else:
@@ -1143,6 +1221,19 @@ class Desk:
         if words := next_page_words(reply):
             channel.offer_next(message.chat, sent, words)
         self.offer_if_entered(channel, message.chat, sent, mode_before)
+
+    def answered_in_words(self, channel, message):
+        question = self.questions.waiting(channel, message.chat)
+        if not question or question.wanted:
+            return message
+        words = " ".join(re.sub(r"[^\w\s]|_", "", message.text.lower()).split())
+        command = CHAT_CONFIRM if words in CONFIRM_WORDS else CHAT_CANCEL if words in CANCEL_WORDS else None
+        return Message(message.chat, command, message.sender, message.id) if command else message
+
+    def leave_if_left_by(self, channel, message):
+        question = self.questions.waiting(channel, message.chat)
+        if question and question.leaves and not message.text.startswith("/"):
+            self.questions.answered(channel, message.chat).cancels()
 
     def offer_if_entered(self, channel, chat, sent, mode_before):
         mode = self.inside.get(chat)
@@ -1227,7 +1318,16 @@ class Desk:
         if not said or answers_a_question or self.taken_inside(channel, message):
             return message
         self.feedback.routed(message.chat, message.text, said, matched.route, datetime.datetime.now())
-        return Message(message.chat, said, message.sender, message.id)
+        return RoutedMessage(message, said, matched.route)
+
+    def routed_line_answered(self, message, reply):
+        episode = answered_episode(message.heard, [reply], [message.text], message.route["id"])
+        kept = Scratchpad.write(episode)
+        self.episodes.kept(message.chat, kept["id"], message.heard.text, datetime.datetime.now())
+
+    def routed_line_failed(self, chat):
+        self.episodes.fail(chat)
+        self.feedback.exited_nonzero(chat, datetime.datetime.now())
 
     def said_match(self, text):
         matched = (
@@ -1278,6 +1378,7 @@ class Desk:
 
     def routed_no(self, channel, chat, shown, proposal):
         self.feedback.answered(chat, False, datetime.datetime.now())
+        self.episodes.fail(chat)
         channel.show(chat, [shown], f"{proposal}\n🚫 _Not run_", done=True, bottom=False)
 
     def cancel_left_mode(self, channel, said):
@@ -1446,7 +1547,7 @@ class Desk:
     def interviewed(self, channel, chat):
         mode = InsideInterview(self.interview)
         self.now_in(channel, chat, mode)
-        self.take_turn(channel, chat, mode, lambda: self.interview.turn(chat), mode.opening)
+        self.take_turn(channel, chat, mode, lambda: self.interview.opened(chat), mode.opening)
 
     def turn_busy(self, chat):
         return chat in self.turning
@@ -1489,7 +1590,15 @@ class Desk:
 
     def instruct(self, channel, message):
         request = after_word(message)
-        self.entered_instruction(channel, request).propose(self, channel, request)
+        mode = self.entered_instruction(channel, request)
+        shell = FirstInstructionShell(
+            self.talk,
+            self.questions,
+            mode.number,
+            self.episode_failer(message.chat),
+            self.episode_ids(message.chat),
+        )
+        mode.propose_in(shell, self, channel, request)
 
     def instruct_routed(self, channel, message):
         request = after_word(message)
@@ -1499,8 +1608,16 @@ class Desk:
             self.feedback.refused(message.chat, datetime.datetime.now())
             channel.send(message.chat, self.left(channel, message.chat))
 
-        shell = RoutedInstructionShell(self.talk, self.questions, mode.number, unrouted)
+        failed = self.episode_failer(message.chat)
+        episode_ids = self.episode_ids(message.chat)
+        shell = RoutedInstructionShell(self.talk, self.questions, mode.number, failed, episode_ids, unrouted)
         mode.propose_in(shell, self, channel, request)
+
+    def episode_failer(self, chat):
+        return lambda: self.episodes.fail(chat)
+
+    def episode_ids(self, chat):
+        return lambda: self.episodes.ids(chat)
 
     def entered_instruction(self, channel, request):
         entry = Instructions.add(request.text)
@@ -2052,6 +2169,7 @@ class Desk:
 
     def tinker(self, arguments, timeout=120, env=None):
         done = self.run_tinker(arguments, timeout, env)
+        self.exits.nonzero = bool(done.returncode)
         return shown_output(done.stdout + done.stderr)
 
     def printed(self, arguments):
@@ -2162,12 +2280,19 @@ def replied_commands(reply):
     return glance_in_sentence(reply)
 
 
+class RoutedMessage(Message):
+    def __init__(self, heard, line, route):
+        super().__init__(heard.chat, line, heard.sender, heard.id)
+        self.heard, self.route = heard, route
+
+
 def answered_episode(message, reply, lines, route=""):
     said = reply[0] if reply else ""
     failed = not said or said.startswith("⚠️")
     episode = {"chat": message.chat, "message": message.text, "reply": said, "route": route}
     routed = {"routed": lines} if lines else {}
-    return dict(episode, **routed, status=reply_status(said, failed))
+    instruction = {"instruction": True} if isinstance(said, InstructionReply) else {}
+    return dict(episode, **routed, **instruction, status=reply_status(said, failed))
 
 
 def reply_status(said, failed):
@@ -2405,12 +2530,26 @@ class NoFeedback:
         pass
 
 
+class NoEpisodes:
+    def kept(self, chat, episode_id, text, now, memory_id=""):
+        pass
+
+
 class Talk:
-    def __init__(self, commands, pausing_jobs=contextlib.nullcontext, routes=None, known=dict, feedback=None):
+    def __init__(
+        self,
+        commands,
+        pausing_jobs=contextlib.nullcontext,
+        routes=None,
+        known=dict,
+        feedback=None,
+        episodes=None,
+    ):
         self.commands, self.turn = commands, threading.Lock()
         self.pausing_jobs = pausing_jobs
         self.routes, self.known, self.used_routes = routes or NoRoutes(), known, {}
         self.feedback = feedback or NoFeedback()
+        self.episodes = episodes or NoEpisodes()
         self.amending, self.amended_texts = {}, {}
         self.answering_chats = set()
 
@@ -2429,14 +2568,15 @@ class Talk:
         write=None,
         on_shown=None,
         on_command=None,
+        keep=None,
     ):
         threading.Thread(
             target=self.answering,
-            args=(channel, message, now, state, write or self.reply, on_shown, on_command),
+            args=(channel, message, now, state, write or self.reply, on_shown, on_command, keep),
             daemon=True,
         ).start()
 
-    def answering(self, channel, message, now, state, write_reply, on_shown, on_command):
+    def answering(self, channel, message, now, state, write_reply, on_shown, on_command, keep=None):
         running, written, reply = now(), threading.Event(), []
         asked = (channel, message, state, CHAT_MAX_REPLY_TOKENS)
         threading.Thread(target=self.write, args=(write_reply, asked, reply, written), daemon=True).start()
@@ -2445,8 +2585,8 @@ class Talk:
         route = self.used_routes.pop(id(message), None)
         learned_text = self.amended_texts.pop(id(message), message.text)
         if not (reply and isinstance(reply[0], Cut)):
-            Scratchpad.write(answered_episode(message, reply, lines, route["id"] if route else ""))
-            if on_command and len(lines) <= 1 and reply_given(reply):
+            (keep or self.keep_episode)(message, reply, lines, route)
+            if on_command and len(lines) <= 1 and reply_teaches(reply):
                 line = lines[0] if lines else "none"
                 self.feedback.routed(message.chat, learned_text, line, route, datetime.datetime.now())
         if lines:
@@ -2462,6 +2602,12 @@ class Talk:
             channel.offer_fresh(message.chat, note[-1])
         if on_shown:
             on_shown(note)
+
+    def keep_episode(self, message, reply, lines, route):
+        kept = Scratchpad.write(answered_episode(message, reply, lines, route["id"] if route else ""))
+        self.episodes.kept(
+            message.chat, kept["id"], message.text, datetime.datetime.now(), answered_from(reply)
+        )
 
     def write(self, write_reply, asked, reply, written):
         try:
@@ -2647,12 +2793,16 @@ class Questions:
 
     def ask(self, channel, chat, question):
         self.by_chat[(channel.name, chat)] = question
+        Home.question_waiting().touch()
 
     def waiting(self, channel, chat):
         return self.by_chat.get((channel.name, chat))
 
     def answered(self, channel, chat):
-        return self.by_chat.pop((channel.name, chat), None)
+        question = self.by_chat.pop((channel.name, chat), None)
+        if not self.by_chat:
+            Home.question_waiting().unlink(missing_ok=True)
+        return question
 
 
 def shown_in(channels, board):
@@ -2814,15 +2964,22 @@ def question_of(item):
 
 
 class Remembered(str):
-    pass
+    def __new__(cls, text, memory_id=""):
+        remembered = super().__new__(cls, text)
+        remembered.memory_id = memory_id
+        return remembered
+
+
+def answered_from(reply):
+    return reply[0].memory_id if reply and isinstance(reply[0], Remembered) else ""
 
 
 class Unanswered(str):
     pass
 
 
-def reply_given(reply):
-    return bool(reply) and not isinstance(reply[0], Unanswered)
+def reply_teaches(reply):
+    return bool(reply) and not isinstance(reply[0], (Unanswered, Remembered))
 
 
 def keep_memory(kind, gist, text, sources):
@@ -2835,7 +2992,8 @@ def remembered_answer(request):
         return None
     return Remembered(
         f'💭 From memory (you asked "{memory["gist"]}" on {memory["last_seen"][:10]}):\n'
-        f"{memory['text']}\n_`/fresh` asks the model again._"
+        f"{memory['text']}\n_`/fresh` asks the model again._",
+        memory["id"],
     )
 
 

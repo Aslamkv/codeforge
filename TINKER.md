@@ -290,8 +290,8 @@ Ask Tinker to do something on this computer, in the conversation or a chat:
 `/instruct WHAT` makes instruction #N and goes inside it; the prompt becomes `🛠 #N Title ›`. Asking in plain
 words (`how much space do my photos take?`) goes there too, and so does a message that could be either a
 question or something to run. Each proposal is one command line, shown with what it does, what it touches and
-how to undo it. `/confirm` (the "✅ Run" button on Telegram) runs it; anything else you send changes the
-request and gets a new proposal. A read-only line shaped like one that worked before (or one of Tinker's
+how to undo it. `/confirm` (the "✅ Run" button on Telegram) or a plain `yes` runs it, `/cancel` or `no`
+drops it; anything else you send changes the request and gets a new proposal. A read-only line shaped like one that worked before (or one of Tinker's
 starters: free disk space, a folder's size, the biggest files) runs at once. A problem with no clear fix
 (`my downloads folder is a mess`) gets a line that only looks.
 
@@ -577,14 +577,17 @@ follows the question before it. Asked the same question again, Tinker answers fr
 marked `💭 From memory`; `/fresh` (or the 🔄 Fresh answer button on Telegram) asks the model again, without
 showing it the earlier answer, and the next dream keeps the new answer. An answer that only holds for a day or a month is let go once it is that old.
 
-While nothing waits for it, Tinker dreams: a few seconds after the queue empties, it turns the fresh episodes
+While nothing waits for it, Tinker dreams: five minutes after the queue empties (but not within ten minutes of
+asking you something, such as a proposal waiting for `/confirm`, which a dream never cancels), it turns the fresh episodes
 into memories (about you, what you did, the tools you use, facts), joins the ones that say the same thing,
 lets fade what was never recalled or seen again, and notices traits: how you work and how you want Tinker to
 be, for good rather than for the moment. It joins traits that say the same thing into one, in the newer words,
 and principles the same way. It keeps what it let go within a fixed space, never by age: past that, the oldest
 retired memories, traits and routes shrink to a stub that still keeps a question from being asked twice, and the
 oldest dreamt episodes are deleted.
-A dream never decides a trait on its own: each one waits as a question for you. At the end of every dream Tinker
+A dream only learns from what you said in chats that went well, never from its own replies. It confirms a trait
+on its own only when you said it in your own words or it shows in at least three chats; any other waits as a
+question for you. At the end of every dream Tinker
 reflects on who you are and who it should be for you, from what it kept, and each thought it keeps becomes a
 question with its guess at your answer. It also reflects on itself, starting from what went wrong: readings
 you turned down or that keep missing, failed chats, instructions and builds. It keeps short notes about itself

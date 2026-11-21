@@ -2,19 +2,23 @@ import datetime
 
 import pytest
 
+from tinkerkit.memory.memories import Memories, Scratchpad
 from tinkerkit.memory.routes import (
     SAID_FILLER,
+    ChatEpisodes,
     Masked,
     Matched,
     RouteFeedback,
     Routes,
     filled,
     forget_route,
+    is_correction,
     mask,
     show_routes,
     slotted,
 )
-from tinkerkit.settings import EVENTS_KEPT_PER_ITEM
+from tinkerkit.ranking import Retriever
+from tinkerkit.settings import EVENTS_KEPT_PER_ITEM, Home
 
 NOW = datetime.datetime(2026, 11, 20, 12, 0, 0)
 LATER = NOW + datetime.timedelta(seconds=60)
@@ -215,11 +219,33 @@ def test_match_finds_the_masked_pattern_exactly_and_fills_its_line(home_store):
 
 
 @pytest.mark.spec("RTE-4", "KNW-11")
-def test_match_takes_the_most_alike_living_route_in_words(home_store):
-    Routes().seed([("system battery", "/system battery"), ("system disk", "/system disk")], NOW)
+def test_match_takes_the_living_route_most_alike_in_content_words(home_store):
+    Routes().seed(
+        [("jobs", "/jobs"), ("system battery", "/system battery"), ("system disk", "/system disk")], NOW
+    )
 
-    assert Routes().match("system batery", KNOWN).line == "/system battery"
+    assert Routes().match("list my jobs please", KNOWN).line == "/jobs"
+    assert Routes().match("list jobs", KNOWN).line == "/jobs"
+    assert Routes().match("show me the system battery", KNOWN).line == "/system battery"
+    assert Routes().match("delete jobs", KNOWN) is None
     assert Routes().match("battery", KNOWN) is None
+    assert Routes().match("system batery", KNOWN) is None
+
+
+@pytest.mark.spec("RTE-4")
+def test_match_has_no_stemming_or_synonyms(home_store):
+    Routes().seed([("skill list", "/skill list"), ("system ram", "/system ram")], NOW)
+
+    assert Routes().match("which skills use", KNOWN) is None
+    assert Routes().match("how much free memory do i have", KNOWN) is None
+
+
+@pytest.mark.spec("RTE-4")
+def test_no_content_words_on_either_side_never_match(home_store):
+    Routes().seed([("show all", "/jobs"), ("status", "/status")], NOW)
+
+    assert Routes().match("show me all please", KNOWN) is None
+    assert Routes().match("list my", KNOWN) is None
 
 
 @pytest.mark.spec("RTE-4")
@@ -232,11 +258,11 @@ def test_match_skips_retired_routes(home_store):
 
 @pytest.mark.spec("RTE-4")
 def test_two_best_routes_with_different_lines_are_unsure(home_store):
-    Routes().seed([("list all runs today", "/runs"), ("list all rung today", "/jobs")], NOW)
+    Routes().seed([("show runs today", "/runs"), ("list runs today", "/jobs")], NOW)
 
-    assert Routes().match("list all runx today", KNOWN) is None
+    assert Routes().match("runs today please", KNOWN) is None
     Routes().apply([{"op": "retire", "id": "r2"}], NOW)
-    assert Routes().match("list all runx today", KNOWN).line == "/runs"
+    assert Routes().match("runs today please", KNOWN).line == "/runs"
 
 
 @pytest.mark.spec("RTE-4")
@@ -415,6 +441,34 @@ def test_a_cancel_of_an_instructs_first_proposal_retires_the_candidate_and_adds_
     assert "candidate" not in heard.last and "model" not in heard.last
 
 
+@pytest.mark.spec("RTE-7")
+def test_a_leave_after_an_instruct_line_retires_the_candidate_and_adds_nothing(home_store):
+    heard = instructed()
+
+    for chat in ["candidate", "model"]:
+        heard.heard(chat, "/leave", LATER)
+        heard.refused(chat, LATER)
+
+    (route,) = Routes().all()
+    assert (route["status"], route["retired"]) == ("retired", "no")
+    assert "candidate" not in heard.last and "model" not in heard.last
+
+
+@pytest.mark.spec("RTE-7")
+@pytest.mark.parametrize("answer", ["/confirm", "/cancel", "/leave"])
+def test_a_proposal_answer_is_never_a_correction(answer):
+    assert not is_correction(answer)
+
+
+@pytest.mark.spec("RTE-7")
+def test_a_leave_after_a_quiet_line_is_a_quiet_yes(home_store):
+    heard = routed()
+
+    heard.heard("chat", "/leave", LATER)
+
+    assert Routes().find("show jobs")["status"] == "confirmed"
+
+
 @pytest.mark.spec("RTE-6")
 def test_a_proposal_waits_through_the_next_message_and_is_never_a_quiet_yes(home_store):
     assert not routed("/stop", quiet=lambda line: True).proposes("chat")
@@ -506,3 +560,198 @@ def test_routes_says_so_when_there_are_none(home_store, capsys):
     show_routes()
 
     assert "No routes yet" in capsys.readouterr().out
+
+
+def kept_episode(chat="chat", text="show the weather in paris"):
+    Scratchpad.write({"chat": chat, "message": text, "reply": "Sunny.", "status": "answered"}, NOW)
+    episodes = ChatEpisodes(lambda: KNOWN)
+    episodes.kept(chat, "e1", text, NOW)
+    return episodes
+
+
+def episode_status():
+    return Home.store().get("episodes", "e1")["status"]
+
+
+@pytest.mark.spec("REM-1")
+def test_failing_a_chat_fails_its_last_kept_episode(home_store):
+    episodes = kept_episode()
+
+    episodes.fail("chat")
+
+    assert episode_status() == "failed"
+
+
+@pytest.mark.spec("REM-1")
+def test_failing_a_chat_without_a_kept_episode_does_nothing(home_store):
+    episodes = kept_episode()
+
+    episodes.fail("other")
+
+    assert episode_status() == "answered"
+
+
+@pytest.mark.spec("RTE-7")
+@pytest.mark.parametrize("correction", ["/weather paris", "no, in london", "I meant tomorrow"])
+def test_a_correction_in_time_fails_the_last_episode(home_store, correction):
+    episodes = kept_episode()
+
+    episodes.heard("chat", correction, LATER)
+
+    assert episode_status() == "failed"
+
+
+@pytest.mark.spec("REM-1")
+def test_a_repeat_in_time_fails_the_last_episode(home_store):
+    episodes = kept_episode()
+
+    episodes.heard("chat", "show the weather in paris!", LATER)
+
+    assert episode_status() == "failed"
+
+
+@pytest.mark.spec("REM-1")
+def test_a_repeat_with_another_known_value_in_its_slot_fails_the_last_episode(home_store):
+    episodes = kept_episode(text="use qwen3:8b")
+
+    episodes.heard("chat", "use gemma", LATER)
+
+    assert episode_status() == "failed"
+
+
+@pytest.mark.spec("REM-1")
+@pytest.mark.spec("RTE-4")
+def test_a_reworded_repeat_with_the_same_content_words_fails_the_last_episode(home_store):
+    episodes = kept_episode(text="list jobs please")
+
+    episodes.heard("chat", "show my jobs", LATER)
+
+    assert episode_status() == "failed"
+
+
+@pytest.mark.spec("REM-1")
+@pytest.mark.spec("RTE-4")
+@pytest.mark.parametrize("text", ["delete jobs", "show me all please"])
+def test_a_message_with_other_content_words_keeps_the_last_episode(home_store, text):
+    episodes = kept_episode(text="list jobs")
+
+    episodes.heard("chat", text, LATER)
+
+    assert episode_status() == "answered"
+
+
+@pytest.mark.spec("REM-1")
+@pytest.mark.parametrize("text", ["thanks", "what is the time"])
+def test_another_message_keeps_the_last_episode(home_store, text):
+    episodes = kept_episode()
+
+    episodes.heard("chat", text, LATER)
+
+    assert episode_status() == "answered"
+
+
+@pytest.mark.spec("RTE-7")
+@pytest.mark.parametrize("text", ["no, in london", "show the weather in paris"])
+def test_a_correction_or_repeat_after_the_window_keeps_the_last_episode(home_store, text):
+    episodes = kept_episode()
+
+    episodes.heard("chat", text, TOO_LATE)
+
+    assert episode_status() == "answered"
+
+
+@pytest.mark.spec("RTE-7")
+def test_only_the_next_message_of_the_same_chat_counts(home_store):
+    episodes = kept_episode()
+
+    episodes.heard("other", "no", LATER)
+    episodes.heard("chat", "thanks", LATER)
+    episodes.heard("chat", "no", LATER)
+    episodes.fail("chat")
+
+    assert episode_status() == "answered"
+
+
+def two_kept_episodes(first="show the weather in paris", second="Sunny in Paris."):
+    episodes = ChatEpisodes(lambda: KNOWN)
+    ids = []
+    for text, at in ((first, NOW), (second, LATER)):
+        kept = Scratchpad.write(
+            {"chat": "chat", "message": text, "reply": "Sunny.", "status": "answered"}, at
+        )
+        episodes.kept("chat", kept["id"], text, at)
+        ids.append(kept["id"])
+    return episodes, ids
+
+
+def statuses(ids):
+    return [Home.store().get("episodes", episode_id)["status"] for episode_id in ids]
+
+
+@pytest.mark.spec("REM-1")
+def test_failing_a_chat_fails_every_episode_kept_since_its_last_message(home_store):
+    episodes, ids = two_kept_episodes()
+
+    episodes.fail("chat")
+
+    assert statuses(ids) == ["failed", "failed"]
+
+
+@pytest.mark.spec("REM-1")
+def test_a_repeat_of_the_first_kept_message_fails_every_episode_kept_since(home_store):
+    episodes, ids = two_kept_episodes()
+
+    episodes.heard("chat", "show the weather in paris!", LATER)
+
+    assert statuses(ids) == ["failed", "failed"]
+
+
+@pytest.mark.spec("REM-1")
+def test_episodes_kept_before_the_last_heard_message_are_not_failed(home_store):
+    episodes, ids = two_kept_episodes()
+
+    episodes.heard("chat", "thanks", LATER)
+    episodes.fail("chat")
+
+    assert statuses(ids) == ["answered", "answered"]
+
+
+def remembered_episode(chat="chat", text="how tall is everest in km"):
+    memory = Memories(Retriever(None)).add("answer", text, "About 8.85 km.", ["e0"], NOW, "always")
+    Scratchpad.write({"chat": chat, "message": text, "reply": "From memory", "status": "remembered"}, NOW)
+    episodes = ChatEpisodes(lambda: KNOWN)
+    episodes.kept(chat, "e1", text, NOW, memory["id"])
+    return episodes, memory["id"]
+
+
+def retired_why(memory_id):
+    return Home.store().get("memories", memory_id).get("retired")
+
+
+@pytest.mark.spec("REM-12", "REM-1")
+@pytest.mark.parametrize("text", ["no, about 8.8", "how tall is everest in km?"])
+def test_a_failed_remembered_reply_retires_its_answer_memory(home_store, text):
+    episodes, memory_id = remembered_episode()
+
+    episodes.heard("chat", text, LATER)
+
+    assert episode_status() == "failed"
+    assert retired_why(memory_id) == "turned down"
+
+
+@pytest.mark.spec("REM-12")
+def test_a_remembered_reply_that_stands_keeps_its_answer_memory(home_store):
+    episodes, memory_id = remembered_episode()
+
+    episodes.heard("chat", "thanks", LATER)
+
+    assert retired_why(memory_id) == ""
+
+
+@pytest.mark.spec("REM-12", "REM-1")
+def test_failing_a_chat_retires_the_answer_memory_of_its_remembered_reply(home_store):
+    episodes, memory_id = remembered_episode()
+
+    episodes.fail("chat")
+
+    assert retired_why(memory_id) == "turned down"

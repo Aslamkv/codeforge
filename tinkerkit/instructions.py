@@ -68,13 +68,14 @@ class Instructions:
         }
         undoes = {"undoes": proposed["undoes"]} if "undoes" in proposed else {}
         at_once = {"at_once": True} if proposed.get("at_once") else {}
+        episodes = {"episodes": proposed["episodes"]} if proposed.get("episodes") else {}
         return INSTRUCTIONS.update(
             number,
             lambda entry: dict(
                 entry,
                 runs=[
                     *entry["runs"],
-                    run | {"corrected": corrected_request(entry["thread"])} | undoes | at_once,
+                    run | {"corrected": corrected_request(entry["thread"])} | undoes | at_once | episodes,
                 ],
             ),
         )
@@ -171,9 +172,16 @@ class Run:
     @staticmethod
     def back_up(run_folder, originals):
         backups = Backups({}, True)
-        if Run.size(originals) <= BACKUP_MAX_BYTES:
+        if Run.fits_backup(originals):
             backups = Run.cloned(run_folder / "backup", originals)
         (run_folder / "backups").write_text(json.dumps(backups._asdict()))
+
+    @staticmethod
+    def fits_backup(originals):
+        try:
+            return Run.size(originals) <= BACKUP_MAX_BYTES
+        except OSError:
+            return False
 
     @staticmethod
     def size(originals):

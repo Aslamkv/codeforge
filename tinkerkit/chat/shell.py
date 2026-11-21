@@ -28,13 +28,17 @@ SHELL_BUILTINS_AND_KEYWORDS = frozenset(
 )
 
 
+class InstructionReply(str):
+    pass
+
+
 ShellRun = namedtuple("ShellRun", "code output")
 
 
 Question = namedtuple(
     "Question",
-    "runs cancels held wanted naming amends",
-    defaults=(None, lambda: None, None, None, False, None),
+    "runs cancels held wanted naming amends leaves",
+    defaults=(None, lambda: None, None, None, False, None, False),
 )
 
 
@@ -251,9 +255,13 @@ class Shell:
             channel,
             message,
             now,
-            write=lambda *asked: self.propose(*asked, thread),
+            write=lambda *asked: InstructionReply(self.propose(*asked, thread)),
             on_shown=lambda ids: self.proposal_shown(channel, message.chat, ids),
+            keep=self.keep_episode,
         )
+
+    def keep_episode(self, *answered):
+        self.talk.keep_episode(*answered)
 
     def proposal_shown(self, channel, chat, ids):
         starting, self.starting = self.starting, None
@@ -271,7 +279,7 @@ class Shell:
 
     def propose(self, channel, message, state, tokens, thread):
         if not Models.quick():
-            self.questions.answered(channel, message.chat)
+            self.gave_no_line(channel, message.chat)
             return "⚠️ **No model is in use yet:** `tinker model NAME` picks one."
         latest = thread[-1]["text"]
         recalled = recall(latest, ("tool",))
@@ -294,14 +302,14 @@ class Shell:
                 )
             )
         except OllamaError as exc:
-            self.questions.answered(channel, message.chat)
+            self.gave_no_line(channel, message.chat)
             return md(t"⚠️ **The model did not answer:** {first_words(exc)}")
         if data is None:
-            self.questions.answered(channel, message.chat)
+            self.gave_no_line(channel, message.chat)
             return "🤷 **Couldn't read the model's answer:** describe it another way"
         line, does = field(data, "line"), field(data, "does")
         if not line or "\n" in line or not names_a_command(line):
-            self.questions.answered(channel, message.chat)
+            self.gave_no_line(channel, message.chat)
             return md(t"🤷 **No command found:** {does or 'describe it another way'}")
         proposed = {
             "line": line,
@@ -315,15 +323,17 @@ class Shell:
         known = [item["text"] for item in recalled if item.get("kind") == "tool"]
         return Checked.of(line, self.folder, known).offer(self, channel, message.chat, proposed)
 
+    def gave_no_line(self, channel, chat):
+        self.questions.answered(channel, chat)
+
     def wait_for_confirm(self, channel, chat, proposed):
-        self.questions.ask(
-            channel,
-            chat,
-            Question(
-                runs=lambda: self.run(channel, chat, proposed),
-                cancels=lambda: self.drop(channel, chat, proposed),
-                held=proposed,
-            ),
+        self.questions.ask(channel, chat, self.confirm_question(channel, chat, proposed))
+
+    def confirm_question(self, channel, chat, proposed):
+        return Question(
+            runs=lambda: self.run(channel, chat, proposed),
+            cancels=lambda: self.drop(channel, chat, proposed),
+            held=proposed,
         )
 
     def start_at_once(self, channel, chat, proposed):

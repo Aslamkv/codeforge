@@ -73,14 +73,14 @@ def test_a_round_is_given_both_sides_the_evidence_the_thoughts_and_how_many_wait
     assert asked[-1][0]["content"] == Prompts.REFLECT_SYSTEM
     assert [trait["id"] for trait in content["person"]["confirmed"]] == [confirmed["id"]]
     assert content["person"]["pending"] == [
-        {"text": "What do you build?", "thought": "work is unknown", "expected": "tools"}
+        {"id": "q1", "text": "What do you build?", "thought": "work is unknown", "expected": "tools"}
     ]
     assert content["person"]["answered"] == [{"text": "Which editor do you use?", "answer": "Helix"}]
     assert content["tinker"]["answered"] == []
     assert list(content["person"]) == ["confirmed", "candidates", "pending", "answered", "retired"]
     assert content["tinker"]["retired"][0]["why"] == "never said so"
     assert content["tinker"]["confirmed"] == []
-    assert content["evidence"]["episodes"] == [{"id": first["id"], "gist": "I write Rust at work"}]
+    assert content["evidence"]["episodes"] == [{"id": first["id"], "words": "I write Rust at work"}]
     assert [memory["id"] for memory in content["evidence"]["memories"]] == [person["id"]]
     assert content["thoughts"] == ["before"]
     assert content["waiting"] == 1
@@ -113,10 +113,38 @@ def test_a_round_shows_only_the_newest_dreamt_episodes(home_store, monkeypatch):
 
     Reflection().round(NOW)
 
-    gists = [episode["gist"] for episode in given(asked)["evidence"]["episodes"]]
-    assert len(gists) == REFLECT_EPISODES
-    assert gists[0] == f"episode {REFLECT_EPISODES + 1}"
-    assert "fresh" not in gists
+    words = [episode["words"] for episode in given(asked)["evidence"]["episodes"]]
+    assert len(words) == REFLECT_EPISODES
+    assert words[0] == f"episode {REFLECT_EPISODES + 1}"
+    assert "fresh" not in words
+
+
+@pytest.mark.spec("REF-1")
+def test_a_rounds_evidence_is_the_persons_own_words_of_episodes_that_did_not_fail(home_store, monkeypatch):
+    shown = [
+        instruction_episode("list files", 0, 1),
+        build_episode("make a game", "done", 2),
+        chat_episode("I write Rust", "answered", 3),
+    ]
+    hidden = [
+        chat_episode("hello", "failed", 4),
+        instruction_episode("rm x", 1, 5),
+        build_episode("make a site", "blocked", 6),
+    ]
+    for hour, episode in enumerate(shown + hidden, start=7):
+        Scratchpad.dreamt([episode["id"]], at_hour(hour), {episode["id"]: f"gist {hour}"})
+    for number in range(REFLECT_EPISODES):
+        failed = chat_episode(f"broken {number}", "failed", 13)
+        Scratchpad.dreamt([failed["id"]], at_hour(14), {failed["id"]: "broken"})
+    asked = replying(monkeypatch, {"thought": "", "add": [], "questions": [], "done": True})
+
+    Reflection().round(NOW)
+
+    assert given(asked)["evidence"]["episodes"] == [
+        {"id": shown[2]["id"], "words": "I write Rust"},
+        {"id": shown[1]["id"], "words": "make a game"},
+        {"id": shown[0]["id"], "words": "list files"},
+    ]
 
 
 @pytest.mark.spec("REF-1")
@@ -164,6 +192,33 @@ def test_a_round_keeps_a_candidate_with_its_confirm_question_and_an_open_questio
     assert reflection.thoughts == ["work shows, goals do not"]
 
 
+@pytest.mark.spec("REM-5", "DRM-6")
+def test_a_stated_or_three_episode_add_is_confirmed_without_a_question(home_store, monkeypatch):
+    episodes = [
+        dreamt_episode(message) for message in ("I write Rust", "I play chess", "chess again", "more chess")
+    ]
+    first, *chess = [episode["id"] for episode in episodes]
+    replying(
+        monkeypatch,
+        {
+            "thought": "both are plain",
+            "add": [
+                dict(added("writes Rust", [first], "person", "Do you write Rust?"), stated=True),
+                added("plays chess", chess, "person", "Do you play chess?"),
+                dict(added("answers briefly", [first], "tinker", "Short replies?"), stated="yes"),
+            ],
+            "questions": [],
+            "done": False,
+        },
+    )
+
+    kept = Reflection().round(NOW)
+
+    assert [trait["do"] for trait in Traits().confirmed()] == ["writes Rust", "plays chess"]
+    assert [trait["do"] for trait in Traits().candidates()] == ["answers briefly"]
+    assert [question["text"] for question in kept["kept"]] == ["Short replies?"]
+
+
 @pytest.mark.spec("REM-15")
 def test_a_round_drops_an_open_question_meaning_an_answered_one(home_store, monkeypatch):
     settled = ask(HELIX, now=NOW)
@@ -177,6 +232,34 @@ def test_a_round_drops_an_open_question_meaning_an_answered_one(home_store, monk
     kept = Reflection().round(NOW)
 
     assert [question["text"] for question in kept["kept"]] == [CHESS]
+
+
+@pytest.mark.spec("REF-1")
+def test_a_round_drops_only_the_pending_questions_it_names_with_their_why(home_store, monkeypatch):
+    repeated = ask("Which editor do you use?", sources=[], now=NOW)
+    covered = ask("Do you write Rust?", sources=[], now=NOW)
+    answered = ask("What do you build?", sources=[], now=NOW)
+    waiting = ask("Which OS do you use?", sources=[], now=NOW)
+    Questions().answer(answered["id"], "tools", NOW)
+    trait = confirmed_trait("writes Rust at work")
+    drops = [
+        {"id": repeated["id"], "why": "repeats another"},
+        {"id": covered["id"], "why": "a trait covers it"},
+        {"id": answered["id"], "why": "answered"},
+        {"id": trait["id"], "why": "not a question"},
+        {"id": "q99", "why": "unknown"},
+        {"id": repeated["id"], "why": "again"},
+        "not an item",
+    ]
+    replying(monkeypatch, {"thought": "tidy", "add": [], "questions": [], "drop": drops, "done": True})
+
+    kept = Reflection().round(NOW)
+
+    assert kept["dropped"] == [repeated["id"], covered["id"]]
+    assert home_store.get("questions", repeated["id"])["answer"] == "repeats another"
+    assert home_store.get("questions", covered["id"])["status"] == "dropped"
+    assert home_store.get("questions", answered["id"])["answer"] == "tools"
+    assert [question["id"] for question in Questions().pending()] == [waiting["id"]]
 
 
 @pytest.mark.spec("REF-1")

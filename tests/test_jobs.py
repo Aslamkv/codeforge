@@ -37,7 +37,14 @@ from tinkerkit.jobs import (
 from tinkerkit.knowledge.curriculum import SlotLearner
 from tinkerkit.knowledge.library import Learner, Researcher
 from tinkerkit.model.models import Ollama
-from tinkerkit.settings import DREAM_IDLE_SECONDS, JOB_START_TRIES, JOB_STOP_SIGNAL, Config, Home
+from tinkerkit.settings import (
+    DREAM_IDLE_SECONDS,
+    DREAM_PROPOSAL_HOLD_SECONDS,
+    JOB_START_TRIES,
+    JOB_STOP_SIGNAL,
+    Config,
+    Home,
+)
 
 DEAD_PID = 999999999
 
@@ -957,6 +964,26 @@ def test_an_idle_queue_with_a_fresh_episode_queues_one_dream(home_store, monkeyp
     Runner.dream_when_idle(200.0)
     Runner.dream_when_idle(200.0 + DREAM_IDLE_SECONDS)
     assert queued_dreams() == dreams
+
+
+def question_asked(seconds_ago):
+    marker = Home.question_waiting()
+    marker.touch()
+    asked = time.time() - seconds_ago
+    os.utime(marker, (asked, asked))
+
+
+@pytest.mark.spec("DRM-1", "CNV-10")
+def test_a_waiting_question_holds_the_dream_until_the_hold_has_passed(home_store, monkeypatch):
+    monkeypatch.setattr(Runner, "idle_since", None)
+    fresh_episode()
+    question_asked(DREAM_PROPOSAL_HOLD_SECONDS - 60)
+    Runner.dream_when_idle(100.0)
+    Runner.dream_when_idle(100.0 + DREAM_IDLE_SECONDS)
+    assert queued_dreams() == []
+    question_asked(DREAM_PROPOSAL_HOLD_SECONDS + 1)
+    Runner.dream_when_idle(100.0 + DREAM_IDLE_SECONDS + 1)
+    assert len(queued_dreams()) == 1 and Home.question_waiting().exists()
 
 
 @pytest.mark.spec("DRM-1")

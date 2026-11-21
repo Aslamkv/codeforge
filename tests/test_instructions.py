@@ -252,6 +252,25 @@ def test_a_failed_clone_leaves_no_backup_and_the_run_irreversible(tinker_home, t
     assert not (run_folder / "backup").exists()
 
 
+@pytest.fixture
+def unreadable(touched):
+    locked = touched / "pages" / "locked"
+    locked.mkdir()
+    locked.chmod(0)
+    yield touched
+    locked.chmod(0o755)
+
+
+@pytest.mark.spec("INS-4")
+def test_a_touched_path_that_cannot_be_sized_runs_the_line_with_no_backup_and_irreversible(
+    tinker_home, unreadable
+):
+    run_folder = Run.start(1, "echo ran", str(unreadable), touches=("notes.txt", "pages"))
+    assert ended_run(run_folder).code == 0
+    assert Run.backups(run_folder) == Backups({}, True)
+    assert not (run_folder / "backup").exists()
+
+
 @pytest.mark.spec("INS-4")
 def test_a_run_touching_nothing_has_no_backups_and_stays_reversible(tinker_home, work):
     run_folder = Run.start(1, "true", str(work))

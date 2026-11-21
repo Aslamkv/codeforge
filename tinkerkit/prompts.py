@@ -1163,7 +1163,8 @@ Reply with ONLY JSON: {"claims":[{"claim":1,"verdict":"holds","why":"one short s
         "You are Tinker, a friendly helper that builds small programs on this computer with a local model. "
         "{style} Talk about anything. "
         "In this chat you only talk: nothing runs, so never say you did, ran, checked, changed or deleted "
-        "anything, and never give shell commands to run."
+        "anything, and never give shell commands to run. "
+        "Never say you remembered, noted or updated anything: only a dream changes what you remember."
     )
 
     INSTRUCT_POINTER = (
@@ -1230,23 +1231,28 @@ Reply with ONLY JSON: {"claims":[{"claim":1,"verdict":"holds","why":"one short s
     )
 
     DREAM_TRAITS_SYSTEM = (
-        "You learn how best to help a person. You get the gists of new episodes and the memories about the "
-        "person that just changed, each with its id, and the traits already known. A trait is about person "
+        "You learn how best to help a person. You get the person's own words in the episodes that did not "
+        "fail, never Tinker's reply, and the memories about the person that just changed, each with its id, "
+        "and the traits already known. A trait is about person "
         "(who the person is: work, goals, likes) or tinker (who Tinker is for them: role, duties, tone, how "
         "it builds), when is the situation it holds in, empty when it always holds, and do is the trait as "
         "said. A trait is lasting (work, goals, likes, ways of working), never a passing state (the folder, "
         "the time, one command's output). Give each add the thought that led to it and expected, your guess "
         "at the person's answer. The person reads the question, thought and expected: plain words, naming no "
-        "id. Reply with only one JSON object:\n"
+        "id. stated is true when the person said the trait in their own words, then it is not asked. Reply "
+        "with only one JSON object:\n"
         '{"add":[{"about":"person|tinker","when":"the situation, or empty","do":"the trait as said",'
-        '"sources":["e1","m1"],"question":"a short question the person answers to confirm it, shown to the '
+        '"sources":["e1","m1"],"stated":true|false,"question":"a short question the person answers to confirm it, shown to the '
         'person in plain words, naming no id",'
         '"thought":"why you ask, shown to the person in plain words, naming no id",'
         '"expected":"your guess at the answer, shown to the person in plain words, naming no id"}],\n'
-        ' "support":[{"id":"t1","sources":["e1"]}]}\n'
-        "Add every new trait the episodes and memories show and support a known trait they show again. Every "
-        "add and support cites the ids it rests on. Use only the ids you are given. Leave a list empty when "
-        "nothing fits."
+        ' "support":[{"id":"t1","sources":["e1"]}],\n'
+        ' "change":[{"id":"t1","when":"the situation, or empty","do":"the trait as the person now says it",'
+        '"sources":["e1"]}]}\n'
+        "Add every new trait the episodes and memories show and support a known trait they show again. "
+        "Change a known trait only when the person's own words now say otherwise. Every add, support and "
+        "change cites the ids it rests on. Use only the ids you are given. Leave a list empty when nothing "
+        "fits."
     )
 
     TINKER_PURPOSE = (
@@ -1266,7 +1272,8 @@ Reply with ONLY JSON: {"claims":[{"claim":1,"verdict":"holds","why":"one short s
         "them: role, duties, tone, how it builds), the confirmed traits, the candidates, the pending questions "
         "with the thought behind each and the answer expected, the questions the person already answered, with "
         "the answers, and the traits the person retired with why; "
-        "the evidence, the gists of recent episodes and the memories about the person, each with its id; "
+        "the evidence, the person's own words in recent episodes that did not fail, never Tinker's reply, and "
+        "the memories about the person, each with its id; "
         "when given, self, facts measured about Tinker and the notes it kept about itself; "
         "your thoughts so far; and how many questions are waiting. A trait has when, the situation it holds "
         "in, empty when it always holds, and do, the trait as said. A trait is lasting (work, goals, likes, "
@@ -1278,7 +1285,8 @@ Reply with ONLY JSON: {"claims":[{"claim":1,"verdict":"holds","why":"one short s
         f"{REFLECT_WAITING} questions waiting is plenty: a guideline, never a reason to "
         "stop thinking. Never ask again a question like one waiting, nor about a trait the person retired, "
         "nor what an asked question or a known trait already covers, even in other words. Never ask an answered "
-        "question again, in any words. Reply with only one "
+        "question again, in any words. Drop a pending question that repeats another or that a known trait "
+        "already covers, by its id, saying why. Reply with only one "
         "JSON object:\n"
         '{"thought":"what you notice and still wonder, in two or three sentences",\n'
         ' "add":[{"about":"person|tinker","when":"the situation, or empty","do":"the trait as said",'
@@ -1288,6 +1296,7 @@ Reply with ONLY JSON: {"claims":[{"claim":1,"verdict":"holds","why":"one short s
         ' "questions":[{"about":"person|tinker","text":"a short question, shown to the person in plain words, '
         'naming no id","thought":"why you ask, shown to the person in plain words, naming no id",'
         '"expected":"your guess at the answer, shown to the person in plain words, naming no id"}],\n'
+        ' "drop":[{"id":"a pending question id","why":"the question it repeats or the trait that covers it"}],\n'
         ' "done":false}\n'
         "Every add cites the ids it rests on; use only the ids you are given. Leave a list empty when nothing "
         "fits. Say done true when nothing is left worth adding or asking."
@@ -1307,8 +1316,9 @@ Reply with ONLY JSON: {"claims":[{"claim":1,"verdict":"holds","why":"one short s
         "You tidy what is known about a person and about Tinker for them. You get a group of similar traits, "
         "each with its id, about (person or tinker), when (the situation it holds in, empty when it always "
         "holds), do (the trait as said) and when it last changed. The traits come newest first. Join the ones "
-        "that say the same thing into one trait; where they disagree, the newer wording wins. Reply with only "
-        "one JSON object:\n"
+        "that say the same thing into one trait; where they disagree, the newer wording wins. The joined "
+        "trait keeps every detail of each (a tool, a name, a number) unless a newer one contradicts it. Reply "
+        "with only one JSON object:\n"
         '{"merge":[{"ids":["t1","t2"],"when":"the situation, or empty","do":"the trait as said"}]}\n'
         "Use only the ids you are given. Leave the list empty when nothing fits."
     )
@@ -1345,7 +1355,7 @@ Reply with ONLY JSON: {"claims":[{"claim":1,"verdict":"holds","why":"one short s
         '{"say":"your reply to the person, one or two sentences, never a question",\n'
         ' "confirm":["ids of the traits the message says hold"],\n'
         ' "reject":[{"id":"a trait id","why":"why it does not hold"}],\n'
-        ' "amend":[{"id":"a trait id","when":"when it holds now","do":"the habit it holds now"}],\n'
+        ' "amend":[{"id":"a trait id","when":"the situation it holds in, or empty","do":"the lasting habit"}],\n'
         ' "add":[{"about":"person|tinker","when":"when it holds, or empty","do":"the lasting habit"}],\n'
         ' "question":null or {"about":"person|tinker","text":"a short follow-up question, shown to the person in '
         'plain words, naming no id",'
@@ -1355,17 +1365,23 @@ Reply with ONLY JSON: {"claims":[{"claim":1,"verdict":"holds","why":"one short s
         "Your say is one or two short sentences replying to the message only; it never asks the current "
         "question or the next one: Tinker shows the question itself after the say, and the next waiting "
         "question is only to lead into. In say, it never claims to have recorded, saved or noted anything. "
+        "Your say never names Tinker's workings (traits, candidates, episodes, deltas, recording) nor what "
+        "Tinker can or cannot change about its asking, and never repeats the message back. Your question's "
+        'thought, text and expected speak to the person as "you", never "the user". '
         "Use only the given trait ids and add only what the message says: an add holds only what the person "
         "states, never an inference from a rejection. A follow-up question is about the person or Tinker, "
-        "never a matter the person raised in passing, such as the weather. An add's or amend's do is a "
-        "lasting habit in Tinker's own words, never the message copied, and keeps every detail and condition "
-        "the message gives. When the message asks to be asked something, that is no add: a request to be "
+        "never a matter the person raised in passing, such as the weather. A follow-up question is never the "
+        "person's own message. An add's or amend's do is a lasting habit in Tinker's own words, never the "
+        "message copied, and keeps every detail and condition the message gives. An add's or amend's when "
+        'is the situation the habit holds in, or empty. A when is never the present ("now", "currently"). '
+        "When the message asks to be asked something, that is no add: a request to be "
         "asked something is a question. Settled is true when the message answers the question or asks to move "
         "on from it (ask less, change the topic), and false when it does not answer it (off-topic) or the talk "
         "about it should go on. Your question is null unless the message raises a new follow-up. An off-topic "
         'message, such as "By the way, what\'s the weather like?", gives empty confirm, reject, amend and add, '
-        "and question null. A request about this talk is not a trait: it gives empty confirm, reject, amend and "
-        "add. Leave a list empty when the message gives nothing for it."
+        "and question null. A request about this talk itself (ask less, change the topic) is not a trait: it "
+        "gives empty confirm, reject, amend and add, and settled true; a lasting wish for how Tinker answers, "
+        "such as short answers, is a trait. Leave a list empty when the message gives nothing for it."
     )
 
     CHAT_FILL_SYSTEM = (

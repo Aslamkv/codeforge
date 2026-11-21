@@ -48,6 +48,7 @@ from .reflection import (
     cited_only,
     listed,
     own_traits,
+    own_words,
     said,
     self_facts,
     shown,
@@ -98,7 +99,7 @@ class Dream:
         if not Models.quick():
             return ending("blocked", "No model is in use yet: `tinker model NAME` picks one")
         self.walked(now)
-        return ending("done", "Dreamt")
+        return ending("done", f"Dreamt: {step_counts(self.state)}")
 
     def walked(self, now):
         began = stamp(now)
@@ -135,10 +136,13 @@ class Dream:
         if not isinstance(reply, dict):
             return
         ids = {episode["id"] for episode in batch}
+        unsound = {episode["id"] for episode in batch if no_source(episode)}
         for name, change in CHANGE_OF.items():
             for item in listed(reply.get(name)):
                 if cited(item.get("sources"), ids) and not answer_touched(name, item):
-                    self.logged("consolidate", name, change(self.memories).made(item, item["sources"], now))
+                    self.logged(
+                        "consolidate", *change(self.memories, unsound).made(item, item["sources"], now)
+                    )
         self.answers(batch, reply, now)
         Scratchpad.dreamt(ids, now, self.episode_gists(reply, ids))
         self.state["dreamt"] += [episode["id"] for episode in batch]
@@ -174,7 +178,7 @@ class Dream:
         }
 
     def batch_text(self, batch):
-        living = self.memories.living()
+        living = [memory for memory in self.memories.living() if memory["kind"] != "answer"]
         related = self.memories.hits(
             " ".join(recall_text(episode) for episode in batch), [recall_text(memory) for memory in living]
         )
@@ -234,6 +238,8 @@ class Dream:
             return None
         if not lasts_found(kind, item.get("lasts")):
             return None
+        if any(old["kind"] == "person" for old in merged):
+            kind = "person"
         sources = list(dict.fromkeys(source for memory in merged for source in memory["sources"]))
         memory = self.memories.add(kind, gist, text, sources, now, item.get("lasts"))
         memory = self.memories.update(
@@ -259,18 +265,21 @@ class Dream:
         Scratchpad.prune()
 
     def traits(self, now=None):
-        episodes, people = self.dreamt_episodes(), self.changed_people()
-        if not episodes and not people:
+        words, people = own_words(self.dreamt_episodes()), self.changed_people()
+        if not words and not people:
             return
         living = Traits().living()
-        reply = asked(Prompts.DREAM_TRAITS_SYSTEM, traits_text(episodes, people, living))
+        reply = asked(Prompts.DREAM_TRAITS_SYSTEM, traits_text(words, people, living))
         if not isinstance(reply, dict):
             return
-        given = {item["id"] for item in episodes + people + living}
+        given = {item["id"] for item in words + people + living}
         for item in listed(reply.get("add")):
             trait_added(item, given, now, self.noting("traits"))
         for item in listed(reply.get("support")):
             self.trait_supported(item, given, now)
+        own = {item["id"] for item in words + people}
+        for item in listed(reply.get("change")):
+            self.trait_changed(item, own, now)
 
     def dreamt_episodes(self):
         kept = (Home.store().get(Scratchpad.EPISODES, episode_id) for episode_id in self.state["dreamt"])
@@ -289,6 +298,18 @@ class Dream:
         delta = {"op": "support", "id": item["id"], "sources": cited_only(item.get("sources"), given)}
         for trait in Traits().apply([delta], now):
             self.trait_logged("traits", "support", trait)
+
+    def trait_changed(self, item, own, now):
+        trait_id, do = item.get("id"), item.get("do")
+        if not isinstance(trait_id, str) or not isinstance(do, str) or not do.strip():
+            return
+        if not cited_only(item.get("sources"), own):
+            return
+        delta = {"op": "amend", "id": trait_id, "do": do}
+        if isinstance(item.get("when"), str):
+            delta["when"] = item["when"]
+        for trait in Traits().apply([delta], now):
+            self.trait_logged("traits", "amend", trait)
 
     def trait_logged(self, step, name, trait):
         self.recorded(step, name, dict(trait, gist=trait["gist"] or trait["do"]))
@@ -447,34 +468,59 @@ class MemoryGraph(Graph):
 
 
 class Change:
-    def __init__(self, memories):
+    name = None
+
+    def __init__(self, memories, unsound=frozenset()):
         self.memories = memories
+        self.unsound = unsound
 
     def made(self, item, sources, now):
         target = Home.store().get(Memories.MEMORIES, item.get("id")) if "id" in item else None
         if target and target["retired"]:
             target = None
-        return self.applied(item, target, sources, now)
+        change, target = self.chosen(item, target)
+        return change.name, change.applied(item, target, sources, now)
+
+    def chosen(self, item, target):
+        return self, target
 
     def applied(self, item, target, sources, now):
         raise NotImplementedError
 
 
 class Add(Change):
+    name = "add"
+
+    def chosen(self, item, target):
+        alike = self.alike(item)
+        if alike:
+            return Confirm(self.memories, self.unsound), alike
+        return self, target
+
+    def alike(self, item):
+        if not sound_add(item):
+            return None
+        return self.memories.most_alike(item["kind"], item["gist"], item["text"])
+
     def applied(self, item, target, sources, now):
-        kind, gist, text = item.get("kind"), item.get("gist"), item.get("text")
-        if not all(isinstance(value, str) and value for value in (kind, gist, text)):
+        if not sound_add(item):
             return None
-        if (
-            kind not in Memories.KINDS
-            or not tool_found(kind, item)
-            or not lasts_found(kind, item.get("lasts"))
-        ):
-            return None
-        return self.memories.add(kind, gist, text, sources, now, item.get("lasts"))
+        return self.memories.add(item["kind"], item["gist"], item["text"], sources, now, item.get("lasts"))
+
+
+def sound_add(item):
+    kind, gist, text = item.get("kind"), item.get("gist"), item.get("text")
+    return (
+        all(isinstance(value, str) and value for value in (kind, gist, text))
+        and kind in Memories.KINDS
+        and tool_found(kind, item)
+        and lasts_found(kind, item.get("lasts"))
+    )
 
 
 class Update(Change):
+    name = "update"
+
     def applied(self, item, target, sources, now):
         if not target or not tool_found(target["kind"], item):
             return None
@@ -489,8 +535,11 @@ class Update(Change):
 
 
 class Confirm(Change):
+    name = "confirm"
+
     def applied(self, item, target, sources, now):
-        if not target:
+        sources = [source for source in sources if source not in self.unsound]
+        if not target or not sources:
             return None
         return self.memories.update(
             target["id"],
@@ -507,6 +556,8 @@ def merged(kept, sources):
 
 
 class Retire(Change):
+    name = "retire"
+
     def applied(self, item, target, sources, now):
         if not target:
             return None
@@ -517,10 +568,10 @@ def new_state():
     return {"done": [], "changed": [], "dreamt": [], "counts": {}, "last": "", "thoughts": []}
 
 
-def traits_text(episodes, people, living):
+def traits_text(words, people, living):
     return json.dumps(
         {
-            "episodes": [{"id": episode["id"], "gist": episode.get("gist", "")} for episode in episodes],
+            "episodes": words,
             "memories": shown(people),
             "traits": [{key: trait[key] for key in TRAIT_KEYS} for trait in living],
         },
@@ -626,6 +677,10 @@ def answer_touched(name, item):
     return False
 
 
+def no_source(episode):
+    return episode.get("status") == "failed" or episode.get("code", 0) != 0
+
+
 def answered_in_words(batch):
     return [
         episode
@@ -634,7 +689,8 @@ def answered_in_words(batch):
         and "reply" in episode
         and "commands" not in episode
         and "routed" not in episode
-        and episode.get("status") != "remembered"
+        and "instruction" not in episode
+        and episode.get("status") not in ("remembered", "failed")
     ]
 
 
@@ -716,8 +772,11 @@ def waiting(number, one):
 def last_dream(state):
     if not state["last"]:
         return "No dream yet"
-    counts = " · ".join(f"{step} {state['counts'].get(step, 0)}" for step in Dream.STEPS)
-    return f"Last dream {state['last']}: {counts}"
+    return f"Last dream {state['last']}: {step_counts(state)}"
+
+
+def step_counts(state):
+    return " · ".join(f"{step} {state['counts'].get(step, 0)}" for step in Dream.STEPS)
 
 
 def dream_job():
@@ -856,5 +915,13 @@ class Mind(Subsystem):
             voice,
             "Dreaming",
             lambda tracker: (),
-            lambda tracker: Dream(Retriever(Embeddings.configured()), tracker.phase).run(),
+            lambda tracker: said_when_done(
+                Dream(Retriever(Embeddings.configured()), tracker.phase).run(), voice
+            ),
         )
+
+
+def said_when_done(ended, voice):
+    if ended["status"] == "done":
+        voice.title(ended["headline"], "✅")
+    return ended

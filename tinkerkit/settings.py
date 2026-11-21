@@ -203,6 +203,8 @@ PROBE_SAMPLE_TOKENS = 2048
 LESSON_PHASES = ("design", "config", "tests", "code", "toolchain")
 LESSONS_PER_PROMPT = 5
 SAME_FACT_SIMILARITY = 0.75
+PRESENT_WHENS = ("now", "right now", "currently", "today", "at the moment")
+TRAIT_OBVIOUS_SOURCES = 3
 SAME_MEANING = 0.87
 TOOLCHAIN_HINT_SIMILARITY = 0.7
 EVENTS_KEPT_PER_ITEM = 20
@@ -232,10 +234,13 @@ EPISODES_KEPT_BYTES = 1_000_000
 RETIRED_KEPT_BYTES = 1_000_000
 THREAD_TURNS = 4
 THREAD_MINUTES = 30
+CONFIRM_WORDS = ("yes", "y", "ok", "okay", "sure", "yep", "yeah", "go ahead", "do it")
+CANCEL_WORDS = ("no", "n", "nope", "cancel", "dont")
 RECALL_MEANING = 0.6
 RECALL_SHOWN = 6
 TRAITS_CHARS = 800
-DREAM_IDLE_SECONDS = 5
+DREAM_IDLE_SECONDS = 300
+DREAM_PROPOSAL_HOLD_SECONDS = 600
 JOB_START_TRIES = 3
 DREAM_BATCH_EPISODES = 12
 DREAM_FORGET_DAYS = 60
@@ -251,7 +256,11 @@ ANSWER_LASTS_DAYS = {"day": 1, "month": 30, "always": None}
 ANSWER_SAME_MEANING = 0.9
 QUESTION_SAME_MEANING = 0.9
 ANSWER_SAME_WORDS = 0.9
-ROUTE_SAME_WORDS = 0.9
+ROUTE_SAME_WORDS = 0.75
+ROUTE_COMMON_WORDS = frozenset(
+    {"show", "list", "please", "my", "me", "all", "what", "whats", "the", "a", "can", "you", "i", "want"}
+    | {"see", "give", "tell", "get", "check", "display", "view", "current", "do", "have", "is", "are"}
+)
 NOTE_SAME_WORDS = 0.6
 NOTES_KEPT_BYTES = 20_000
 ROUTE_CORRECTION_SECONDS = 120
@@ -429,6 +438,11 @@ class Home:
     def lock_file(cls, name):
         cls.root.mkdir(parents=True, exist_ok=True)
         return cls.root / f"channel-{name}.lock"
+
+    @classmethod
+    def question_waiting(cls):
+        cls.root.mkdir(parents=True, exist_ok=True)
+        return cls.root / "question-waiting"
 
     @classmethod
     def reset(cls, yes=False):

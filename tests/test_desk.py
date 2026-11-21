@@ -64,6 +64,7 @@ from tinkerkit.desk import (
     JobFollower,
     NoInterview,
     NoWaitingPlan,
+    Questions,
     Talk,
     WaitingName,
     WaitingPlan,
@@ -543,6 +544,7 @@ def chatted(desk, channel, monkeypatch, asked):
 
 def unlearned(desk):
     desk.feedback.last.clear()
+    desk.episodes.since_heard.clear()
     retired = [{"op": "retire", "id": route["id"], "why": "test"} for route in model_routes()]
     desk.routes.apply(retired, datetime.datetime.now())
 
@@ -1568,6 +1570,63 @@ def test_a_no_to_a_routed_proposal_shows_not_run_and_keeps_nothing(proposing):
     assert desk.ran == [] and model_routes() == [] and desk.questions.by_chat == {}
 
 
+@pytest.mark.spec("CNV-10", "RTE-6", "RTE-7")
+def test_a_yes_in_words_to_a_routed_proposal_runs_it_without_the_chat_model(desk, monkeypatch):
+    desk, channel, _ = desk
+    seen = []
+    routing_to(desk, monkeypatch, "/resume #4", seen=lambda message: seen.append(message.text))
+    say(desk, channel, FOURTH)
+    say(desk, channel, "yes")
+    wait_until(lambda: len(model_routes()) == 1)
+    assert seen == [FOURTH] and desk.questions.by_chat == {}
+
+
+@pytest.mark.spec("CNV-10", "RTE-6", "RTE-7")
+def test_a_no_in_words_to_a_routed_proposal_shows_not_run(proposing):
+    desk, channel = proposing
+    say(desk, channel, "Nope.")
+    assert "🚫 _Not run_" in channel.texts()[-1]
+    assert desk.ran == [] and model_routes() == [] and desk.questions.by_chat == {}
+
+
+@pytest.mark.spec("CNV-10", "INS-2")
+def test_a_yes_in_words_confirms_a_typed_instructions_proposal(instructed):
+    desk, channel, proposed = instructed
+    desk.handle(channel, Message("1", "Yes!"))
+    wait_until(lambda: channel.texts()[-1].startswith("▶️ **Running** `echo 1` …"))
+    assert len(proposed) == 1
+
+
+@pytest.mark.spec("CNV-10", "CNV-18", "INS-2")
+def test_a_no_in_words_cancels_a_typed_instructions_proposal(instructed):
+    desk, channel, proposed = instructed
+    desk.handle(channel, Message("1", "no"))
+    assert any("🚫 _Not run" in text for text in channel.texts())
+    assert len(proposed) == 1 and isinstance(desk.inside["1"], InsideInstruction)
+    assert desk.questions.by_chat == {}
+
+
+@pytest.mark.spec("CNV-10", "CNV-11")
+def test_a_yes_to_a_command_asking_for_words_is_its_words(desk, monkeypatch):
+    desk, channel, _ = desk
+    answered = []
+    monkeypatch.setattr(desk, "answer", lambda message, channel: answered.append(message.text))
+    say(desk, channel, "/fix")
+    say(desk, channel, "yes")
+    assert answered == ["/fix yes"]
+
+
+@pytest.mark.spec("CNV-10")
+def test_a_yes_with_no_question_waiting_is_a_plain_message(desk, monkeypatch):
+    desk, channel, _ = desk
+    seen = []
+    monkeypatch.setattr(
+        desk.talk, "answer", lambda channel, message, *args, **options: seen.append(message.text)
+    )
+    say(desk, channel, "yes")
+    assert seen == ["yes"]
+
+
 @pytest.mark.spec("RTE-6")
 def test_a_plain_message_amends_a_routed_proposal_and_proposes_again(proposing, monkeypatch):
     desk, channel = proposing
@@ -2171,7 +2230,9 @@ def test_a_message_that_leaves_the_banner_alone_clears_nothing(desk, monkeypatch
 
 def status_said_while_busy(monkeypatch, asker):
     chat, console, shown = Recorder("bot"), ConsoleChannel(), []
-    monkeypatch.setattr(console, "show", lambda chat, sent, text, done=False: shown.append(text) or [1])
+    monkeypatch.setattr(
+        console, "show", lambda chat, sent, text, done=False, *placed, **going: shown.append(text) or [1]
+    )
     listening = desk_with_a_started_chat(chat)
     listening.channels.append(console)
     listening.consoles.append(console)
@@ -2389,6 +2450,43 @@ def test_a_reply_in_words_followed_by_a_plain_message_adds_a_route_to_none(home_
     feedback.heard("1", "and the crow?", datetime.datetime.now())
     added = Routes().find("tell about robin")
     assert (added["line"], added["source"], added["status"]) == ("none", "model", "candidate")
+
+
+@pytest.mark.spec("RTE-7", "REM-12")
+def test_a_reply_from_memory_followed_by_a_plain_message_teaches_no_route(home_store):
+    feedback = RouteFeedback(Routes(), dict, quiet_line)
+    talk = Talk("task", feedback=feedback)
+    talk.answering(
+        Recorder(),
+        Message("1", "tell me about the robin"),
+        lambda: [],
+        desk_module.NO_CHAT_STATE,
+        lambda *asked: desk_module.Remembered("It is a bird."),
+        None,
+        lambda line: None,
+    )
+    feedback.heard("1", "and the crow?", datetime.datetime.now())
+    assert Routes().find("tell about robin") is None
+
+
+@pytest.mark.spec("REM-12", "REM-1")
+def test_a_corrected_reply_from_memory_retires_its_answer_memory(measured_model):
+    from tinkerkit.memory.routes import ChatEpisodes
+
+    memory = remembered_answer("how tall is everest in km", "About 8.85 km.")
+    episodes = ChatEpisodes(dict)
+    talk = Talk("task", episodes=episodes)
+    talk.answering(
+        Recorder(),
+        Message("1", "how tall is everest in km"),
+        lambda: [],
+        desk_module.NO_CHAT_STATE,
+        talk.reply,
+        None,
+        None,
+    )
+    episodes.heard("1", "no, that is wrong", datetime.datetime.now())
+    assert Home.store().get("memories", memory["id"])["retired"] == "turned down"
 
 
 def answered_on(talk, text):
@@ -2753,10 +2851,59 @@ def test_a_cancel_of_a_typed_instructions_first_proposal_stays_inside(instructed
 @pytest.mark.spec("CNV-18")
 def test_a_cancel_of_a_routed_instructions_later_proposal_stays_inside(routed_instruction):
     desk, channel, _ = routed_instruction
+    desk.handle(channel, Message("1", "/confirm"))
+    wait_until(lambda: Instructions.get(1)["runs"])
     desk.handle(channel, Message("1", "only the big ones"))
     desk.handle(channel, Message("1", "/cancel"))
     assert isinstance(desk.inside["1"], InsideInstruction)
     assert "words: list the big files" not in channel.texts()
+
+
+@pytest.fixture
+def chatted_at_desk(instruction_desk, monkeypatch):
+    desk, _, _ = instruction_desk
+    said = []
+    proposes = desk.talk.answer
+
+    def answer(channel, message, *args, write=None, **options):
+        if write is None:
+            said.append(message.text)
+            return None
+        return proposes(channel, message, *args, write=write, **options)
+
+    monkeypatch.setattr(desk.talk, "answer", answer)
+    return said
+
+
+@pytest.mark.spec("CNV-18", "INS-2")
+def test_a_plain_message_at_a_routed_instructions_first_proposal_leaves_it(
+    routed_instruction, chatted_at_desk
+):
+    desk, channel, _ = routed_instruction
+    line = desk.questions.waiting(channel, "1").held["line"]
+    desk.handle(channel, Message("1", "what is the weather"))
+    assert "1" not in desk.inside
+    assert any(text.startswith(f"🚫 _Not run:_ `{line}`") for text in channel.texts())
+    assert "🛠 **Left #1 list the big files**" in channel.texts()
+
+
+@pytest.mark.spec("CNV-18")
+def test_a_plain_message_leaving_a_routed_instruction_is_answered_as_chat(
+    routed_instruction, chatted_at_desk
+):
+    desk, channel, _ = routed_instruction
+    desk.handle(channel, Message("1", "what is the weather"))
+    assert chatted_at_desk == ["what is the weather"]
+    assert not desk.questions.waiting(channel, "1")
+
+
+@pytest.mark.spec("CNV-18", "INS-2")
+def test_a_plain_message_at_a_typed_instructions_first_proposal_is_an_amend(instructed, chatted_at_desk):
+    desk, channel, proposed = instructed
+    desk.handle(channel, Message("1", "only the big ones"))
+    assert isinstance(desk.inside["1"], InsideInstruction)
+    assert chatted_at_desk == []
+    assert len(proposed) == 2
 
 
 def route_an_instruction(instruction_desk, route):
@@ -2790,10 +2937,24 @@ def test_a_cancel_of_a_model_routed_instructions_first_proposal_keeps_nothing(in
 
 
 @pytest.mark.spec("RTE-7")
-def test_any_other_message_after_a_routed_instruction_is_a_quiet_yes(instruction_desk, candidate_instruction):
+def test_a_confirm_of_a_routed_instructions_first_proposal_is_a_quiet_yes(
+    instruction_desk, candidate_instruction
+):
     desk, channel = route_an_instruction(instruction_desk, candidate_instruction)
+    desk.handle(channel, Message("1", "/confirm"))
+    wait_until(lambda: Instructions.get(1)["runs"])
     desk.handle(channel, Message("1", "only the big ones"))
     assert Routes().find("list the big files")["status"] == "confirmed"
+
+
+@pytest.mark.spec("RTE-7", "CNV-18")
+def test_a_plain_message_at_a_routed_instructions_first_proposal_retires_the_candidate(
+    instruction_desk, candidate_instruction, chatted_at_desk
+):
+    desk, channel = route_an_instruction(instruction_desk, candidate_instruction)
+    desk.handle(channel, Message("1", "what is the weather"))
+    (route,) = model_routes()
+    assert (route["status"], route["retired"]) == ("retired", "no")
 
 
 @pytest.fixture
@@ -2966,6 +3127,43 @@ def test_a_read_only_line_shaped_like_a_tool_memory_starts_at_once(instructed, m
     run = Instructions.get(1)["runs"][-1]
     assert run["line"] == "ls -S" and not desk.questions.waiting(channel, "1")
     assert Instructions.get(1)["thread"][-1] == {"said": "proposal", "text": "ls -S"}
+
+
+@pytest.mark.spec("INS-9")
+def test_a_line_run_at_once_backs_up_none_of_its_touches(instructed, monkeypatch, tmp_path):
+    desk, channel, _ = instructed
+    (touched := tmp_path / "notes.txt").write_text("keep")
+
+    def propose(shell, channel, message, state, tokens, thread):
+        offered = {"line": "ls -S", "asked": message.text, "level": "low", "shown": None, "undo": ""}
+        return Checked.of("ls -S", shell.folder, ["ls -S /tmp"]).offer(
+            shell, channel, message.chat, offered | {"does": "lists", "touches": [str(touched)]}
+        )
+
+    monkeypatch.setattr(Shell, "propose", propose)
+    desk.handle(channel, Message("1", "by size"))
+    wait_until(lambda: channel.texts()[-1].startswith("▶️ **Running** `ls -S` …"))
+    run_folder = Path(Instructions.get(1)["runs"][-1]["folder"])
+    assert Run.backups(run_folder).restores == {} and not (run_folder / "backup").exists()
+
+
+@pytest.mark.spec("INS-4", "INS-9")
+def test_a_confirmed_line_backs_up_its_touches(instructed, monkeypatch, tmp_path):
+    desk, channel, _ = instructed
+    (touched := tmp_path / "notes.txt").write_text("keep")
+
+    def propose(shell, channel, message, state, tokens, thread):
+        offered = {"line": "echo 1", "asked": message.text, "level": "low", "shown": None, "undo": ""}
+        return PlainLine("echo 1").offer(
+            shell, channel, message.chat, offered | {"does": "says", "touches": [str(touched)]}
+        )
+
+    monkeypatch.setattr(Shell, "propose", propose)
+    desk.handle(channel, Message("1", "say one"))
+    desk.handle(channel, Message("1", "/confirm"))
+    wait_until(lambda: channel.texts()[-1].startswith("▶️ **Running** `echo 1` …"))
+    run_folder = Path(Instructions.get(1)["runs"][-1]["folder"])
+    assert list(Run.backups(run_folder).restores) == [str(touched)]
 
 
 def finished_run(tmp_path, ended=None, output="", pid=0):
@@ -3679,6 +3877,16 @@ def test_skip_with_nothing_left_says_so_and_leaves_the_interview(interviewing):
 
 
 @pytest.mark.spec("INT-4")
+def test_skipping_every_question_leaves_the_interview_and_entering_again_opens_them(interviewing):
+    desk, channel, _, _ = interviewing
+    desk.handle(channel, Message("1", "/skip"))
+    desk.handle(channel, Message("1", "/skip"))
+    assert channel.texts()[-1] == ALL_FOR_NOW and desk.inside == {}
+    desk.handle(channel, Message("1", "/interact"))
+    assert channel.texts()[-1] == f"{ENTERED}\n\n{RUST_OPENING}"
+
+
+@pytest.mark.spec("INT-4")
 def test_inside_the_interview_another_command_still_runs(interviewing):
     desk, channel, _, _ = interviewing
     desk.handle(channel, Message("1", "/read list"))
@@ -4270,6 +4478,293 @@ def test_a_confirmed_route_answered_in_words_counts_a_use(talking):
     assert route["uses"] == 1
 
 
+@pytest.mark.spec("REM-1", "RTE-7")
+def test_a_confirmed_routes_line_keeps_one_chat_episode_with_the_persons_words(talking):
+    desk, channel, fake_ollama = talking
+    route = learned_route(pattern_of("which projects are there"), "/runs", confirmed=True)
+    say(desk, channel, "which projects are there")
+    [episode] = Home.store().items(Scratchpad.EPISODES).values()
+    sent = channel.texts()[-1]
+    assert fake_ollama.calls == []
+    assert episode["message"] == "which projects are there" and episode["routed"] == ["/runs"]
+    assert episode["route"] == route["id"] and episode["reply"] and episode["reply"] in sent
+    assert episode["status"] == "answered"
+    assert [kept.episode_id for kept in desk.episodes.since_heard["1"]] == [episode["id"]]
+    [used] = model_routes()
+    assert used["uses"] == 1
+
+
+def exiting_nonzero(desk, monkeypatch):
+    failed = subprocess.CompletedProcess([], 1, "", "boom")
+    monkeypatch.setattr(desk, "run_tinker", lambda arguments, timeout, env=None: failed)
+    monkeypatch.setattr(desk, "tinker", Desk.tinker.__get__(desk))
+
+
+@pytest.mark.spec("RTE-7")
+def test_a_candidate_routes_line_that_exits_nonzero_retires_it(talking, monkeypatch):
+    desk, channel, _ = talking
+    route = learned_route(pattern_of(FOURTH), "/log JOB")
+    exiting_nonzero(desk, monkeypatch)
+    routing_to(desk, monkeypatch, "/log #4", route)
+    monkeypatch.setattr(desk.talk, "told", lambda channel, chat, asked, line, reply: reply)
+    say(desk, channel, FOURTH)
+    wait_until(lambda: any("boom" in text for text in channel.texts()))
+    assert stored_route(route["id"])["status"] == "retired"
+    assert "1" not in desk.feedback.last
+
+
+@pytest.mark.spec("REM-1", "RTE-7")
+def test_a_model_line_that_exits_nonzero_fails_its_episode_and_gives_no_quiet_yes(talking, monkeypatch):
+    desk, channel, fake_ollama = talking
+    exiting_nonzero(desk, monkeypatch)
+    fake_ollama.reply("/log").reply("/log #4").reply("told")
+    say(desk, channel, FOURTH)
+    wait_until(lambda: "told" in channel.texts())
+    [episode] = Home.store().items(Scratchpad.EPISODES).values()
+    assert episode["status"] == "failed"
+    monkeypatch.setattr(desk.talk, "answer", lambda *args, **kwargs: None)
+    say(desk, channel, "thanks")
+    assert model_routes() == []
+
+
+@pytest.mark.spec("REM-1", "RTE-7")
+def test_a_confirmed_routes_line_that_exits_nonzero_fails_its_episode_and_keeps_the_route(
+    talking, monkeypatch
+):
+    desk, channel, _ = talking
+    route = learned_route(pattern_of("which projects are there"), "/runs", confirmed=True)
+    exiting_nonzero(desk, monkeypatch)
+    say(desk, channel, "which projects are there")
+    [episode] = Home.store().items(Scratchpad.EPISODES).values()
+    assert episode["status"] == "failed"
+    assert stored_route(route["id"])["status"] == "confirmed"
+
+
+@pytest.mark.spec("REM-1")
+def test_a_typed_command_keeps_no_chat_episode(talking):
+    desk, channel, _ = talking
+    say(desk, channel, "/runs")
+    assert Home.store().items(Scratchpad.EPISODES) == {}
+
+
+WEATHER = "how is the weather today"
+
+
+def answered_then(desk, channel, fake_ollama, monkeypatch, then):
+    learned_route(pattern_of(WEATHER), "none", confirmed=True)
+    fake_ollama.reply("Sunny.")
+    say(desk, channel, WEATHER)
+    wait_until(lambda: any("Sunny." in text for text in channel.texts()))
+    monkeypatch.setattr(desk.talk, "answer", lambda *args, **kwargs: None)
+    say(desk, channel, then)
+    return episode_statuses()
+
+
+def episode_statuses():
+    episodes = sorted(
+        Home.store().items(Scratchpad.EPISODES).values(), key=lambda episode: int(episode["id"][1:])
+    )
+    return [episode.get("status") for episode in episodes]
+
+
+@pytest.mark.spec("REM-1", "RTE-7")
+def test_a_correction_soon_after_a_chat_answer_fails_its_episode(talking, monkeypatch):
+    desk, channel, fake_ollama = talking
+    assert answered_then(desk, channel, fake_ollama, monkeypatch, "no, I meant tomorrow") == ["failed"]
+
+
+@pytest.mark.spec("REM-1", "RTE-4")
+def test_a_repeat_soon_after_a_chat_answer_fails_its_episode(talking, monkeypatch):
+    desk, channel, fake_ollama = talking
+    assert answered_then(desk, channel, fake_ollama, monkeypatch, "How is the weather today?") == ["failed"]
+
+
+@pytest.mark.spec("REM-1")
+def test_a_correction_after_the_correction_time_leaves_the_chat_episode(talking, monkeypatch):
+    desk, channel, fake_ollama = talking
+    monkeypatch.setattr("tinkerkit.memory.routes.ROUTE_CORRECTION_SECONDS", -1)
+    assert answered_then(desk, channel, fake_ollama, monkeypatch, "no, I meant tomorrow") == ["answered"]
+
+
+@pytest.mark.spec("REM-1")
+def test_an_unrelated_message_after_a_chat_answer_leaves_its_episode(talking, monkeypatch):
+    desk, channel, fake_ollama = talking
+    assert answered_then(desk, channel, fake_ollama, monkeypatch, "thanks") == ["answered"]
+
+
+@pytest.mark.spec("REM-1", "RTE-6")
+def test_a_yes_to_a_routed_proposal_leaves_its_chat_episode(talking):
+    desk, channel, fake_ollama = talking
+    proposed_by_the_model(desk, channel, fake_ollama, "/resume", "/resume #4")
+    say(desk, channel, "/confirm")
+    wait_until(lambda: len(model_routes()) == 1)
+    assert episode_statuses() == ["answered"]
+
+
+@pytest.mark.spec("REM-1", "RTE-6")
+def test_a_no_to_a_routed_proposal_fails_its_chat_episode(talking):
+    desk, channel, fake_ollama = talking
+    proposed_by_the_model(desk, channel, fake_ollama, "/resume", "/resume #4")
+    say(desk, channel, "/cancel")
+    assert episode_statuses() == ["failed"]
+
+
+@pytest.mark.spec("REM-1", "RTE-6")
+def test_an_amend_to_a_routed_proposal_fails_its_chat_episode(talking):
+    desk, channel, fake_ollama = talking
+    proposed_by_the_model(desk, channel, fake_ollama, "/stop", "/stop #4")
+    amended_by_the_model(desk, channel, fake_ollama, "no, resume it", "/resume", "/resume #4")
+    assert episode_statuses()[0] == "failed"
+
+
+def routed_instruction_proposed(desk, channel, fake_ollama, proposal):
+    fake_ollama.reply("/instruct").reply(proposal)
+    shown = len(channel.texts())
+    say(desk, channel, "list the big files")
+    wait_until(lambda: any("Am I right" in text for text in channel.texts()[shown:]))
+
+
+@pytest.mark.spec("REM-1")
+def test_a_routed_instruction_keeps_one_chat_episode(talking):
+    desk, channel, fake_ollama = talking
+    routed_instruction_proposed(desk, channel, fake_ollama, '{"line": "du -sh .", "does": "sizes"}')
+    (episode,) = Home.store().items(Scratchpad.EPISODES).values()
+    assert episode["message"] == "list the big files"
+    assert [line.split()[0] for line in episode["routed"]] == ["/instruct"]
+
+
+@pytest.mark.spec("REM-1", "CNV-18")
+def test_a_routed_instruction_left_at_its_first_proposal_fails_its_chat_episode(talking):
+    desk, channel, fake_ollama = talking
+    routed_instruction_proposed(desk, channel, fake_ollama, '{"line": "du -sh .", "does": "sizes"}')
+    say(desk, channel, "/cancel")
+    assert "1" not in desk.inside
+    assert episode_statuses() == ["failed"]
+
+
+@pytest.mark.spec("REM-1", "INS-2")
+def test_a_routed_instruction_whose_proposal_finds_no_command_fails_its_chat_episode(talking):
+    desk, channel, fake_ollama = talking
+    fake_ollama.reply("/instruct").reply('{"line": "", "does": ""}')
+    say(desk, channel, "list the big files")
+    wait_until(lambda: any("No command found" in text for text in channel.texts()))
+    wait_until(lambda: episode_statuses() == ["failed"])
+
+
+@pytest.mark.spec("REM-1", "INS-4")
+def test_a_routed_instruction_whose_line_could_not_start_fails_its_chat_episode(
+    talking, tmp_path, monkeypatch
+):
+    desk, channel, fake_ollama = talking
+    monkeypatch.setattr(Instructions, "working_folder", staticmethod(lambda number: str(tmp_path / "gone")))
+    routed_instruction_proposed(desk, channel, fake_ollama, '{"line": "du -sh .", "does": "sizes"}')
+    say(desk, channel, "/confirm")
+    wait_until(lambda: any("Could not start" in text for text in channel.texts()))
+    wait_until(lambda: episode_statuses() == ["failed"])
+
+
+def typed_instruction_proposed(desk, channel, fake_ollama, proposal):
+    fake_ollama.reply(proposal)
+    say(desk, channel, "/instruct list the big files")
+    wait_until(lambda: any("Am I right" in text for text in channel.texts()) and len(episode_statuses()) == 1)
+
+
+@pytest.mark.spec("REM-1", "CNV-18")
+def test_a_typed_instruction_cancelled_at_its_first_proposal_fails_its_chat_episode(talking):
+    desk, channel, fake_ollama = talking
+    typed_instruction_proposed(desk, channel, fake_ollama, '{"line": "du -sh .", "does": "sizes"}')
+    say(desk, channel, "/cancel")
+    wait_until(lambda: episode_statuses() == ["failed"])
+
+
+@pytest.mark.spec("REM-1", "CNV-18")
+def test_a_typed_instruction_left_at_its_first_proposal_fails_its_chat_episode(talking):
+    desk, channel, fake_ollama = talking
+    typed_instruction_proposed(desk, channel, fake_ollama, '{"line": "du -sh .", "does": "sizes"}')
+    say(desk, channel, "/leave")
+    wait_until(lambda: episode_statuses() == ["failed"])
+    assert "1" not in desk.inside
+
+
+@pytest.mark.spec("REM-1", "INS-2")
+def test_a_typed_instruction_whose_proposal_finds_no_command_fails_its_chat_episode(talking):
+    desk, channel, fake_ollama = talking
+    fake_ollama.reply('{"line": "", "does": ""}')
+    say(desk, channel, "/instruct list the big files")
+    wait_until(lambda: any("No command found" in text for text in channel.texts()))
+    wait_until(lambda: episode_statuses() == ["failed"])
+
+
+@pytest.mark.spec("REM-1", "INS-4")
+def test_a_typed_instruction_whose_line_could_not_start_fails_its_chat_episode(
+    talking, tmp_path, monkeypatch
+):
+    desk, channel, fake_ollama = talking
+    monkeypatch.setattr(Instructions, "working_folder", staticmethod(lambda number: str(tmp_path / "gone")))
+    typed_instruction_proposed(desk, channel, fake_ollama, '{"line": "du -sh .", "does": "sizes"}')
+    say(desk, channel, "/confirm")
+    wait_until(lambda: any("Could not start" in text for text in channel.texts()))
+    wait_until(lambda: episode_statuses() == ["failed"])
+
+
+@pytest.mark.spec("REM-1", "INS-1")
+def test_a_typed_instruction_whose_confirmed_line_starts_keeps_its_chat_episode(talking):
+    desk, channel, fake_ollama = talking
+    typed_instruction_proposed(desk, channel, fake_ollama, '{"line": "du -sh .", "does": "sizes"}')
+    say(desk, channel, "/confirm")
+    wait_until(lambda: Instructions.get(1)["runs"])
+    assert episode_statuses() == ["answered"]
+
+
+@pytest.mark.spec("DRM-3", "INS-4")
+def test_a_typed_instruction_keeps_its_chat_episode_marked_as_an_instruction(talking):
+    desk, channel, fake_ollama = talking
+    typed_instruction_proposed(desk, channel, fake_ollama, '{"line": "du -sh .", "does": "sizes"}')
+    (episode,) = Home.store().items(Scratchpad.EPISODES).values()
+    assert episode["instruction"] is True
+
+
+def confirmed_line_ended(desk, channel, monkeypatch, tmp_path, code):
+    (run_folder := tmp_path / "run").mkdir()
+    (run_folder / "state").write_text(json.dumps({"pid": 0, "began": ""}))
+    (run_folder / "output.log").write_text("du: no such file" if code else "4.0K\t.")
+    (run_folder / "ended").write_text(f"{code}\n")
+    monkeypatch.setattr(Run, "start", staticmethod(lambda *args, **kwargs: run_folder))
+    asked = len(episode_statuses())
+    say(desk, channel, "/confirm")
+    wait_until(lambda: Instructions.get(1)["runs"])
+    desk.say_run_endings()
+    return episode_statuses()[:asked]
+
+
+@pytest.mark.spec("REM-1", "INS-5")
+def test_a_typed_instruction_whose_line_exits_nonzero_fails_its_chat_episode(talking, tmp_path, monkeypatch):
+    desk, channel, fake_ollama = talking
+    typed_instruction_proposed(desk, channel, fake_ollama, '{"line": "du -sh .", "does": "sizes"}')
+    assert confirmed_line_ended(desk, channel, monkeypatch, tmp_path, 1) == ["failed"]
+
+
+@pytest.mark.spec("REM-1", "INS-5")
+def test_a_typed_instruction_whose_line_exits_zero_keeps_its_chat_episode(talking, tmp_path, monkeypatch):
+    desk, channel, fake_ollama = talking
+    typed_instruction_proposed(desk, channel, fake_ollama, '{"line": "du -sh .", "does": "sizes"}')
+    assert confirmed_line_ended(desk, channel, monkeypatch, tmp_path, 0) == ["answered"]
+
+
+@pytest.mark.spec("REM-1", "INS-5")
+def test_a_routed_instruction_whose_line_exits_nonzero_fails_its_chat_episode(talking, tmp_path, monkeypatch):
+    desk, channel, fake_ollama = talking
+    routed_instruction_proposed(desk, channel, fake_ollama, '{"line": "du -sh .", "does": "sizes"}')
+    assert confirmed_line_ended(desk, channel, monkeypatch, tmp_path, 1) == ["failed"]
+
+
+@pytest.mark.spec("REM-1", "INS-5")
+def test_a_routed_instruction_whose_line_exits_zero_keeps_its_chat_episode(talking, tmp_path, monkeypatch):
+    desk, channel, fake_ollama = talking
+    routed_instruction_proposed(desk, channel, fake_ollama, '{"line": "du -sh .", "does": "sizes"}')
+    assert confirmed_line_ended(desk, channel, monkeypatch, tmp_path, 0) == ["answered"]
+
+
 @pytest.mark.spec("RTE-6")
 def test_an_amend_answered_from_a_remembered_answer_leaves_no_amend_waiting(talking):
     desk, channel, fake_ollama = talking
@@ -4291,3 +4786,17 @@ def test_a_message_answering_a_waiting_question_is_not_matched_by_the_learned_ro
     events = [entry["event"] for entry in Routes().find("status")["history"]]
     shown = [call["messages"][-1]["content"] for call in fake_ollama.calls]
     assert events == ["add"] and not any("Command: /status" in text for text in shown)
+
+
+@pytest.mark.spec("DRM-1", "CNV-10")
+def test_a_waiting_question_is_marked_in_the_home_until_the_last_is_answered():
+    channel = Recorder()
+    questions = Questions()
+    assert not Home.question_waiting().exists()
+    questions.ask(channel, "1", "Build it?")
+    questions.ask(channel, "2", "Keep it?")
+    assert Home.question_waiting().exists()
+    questions.answered(channel, "1")
+    assert Home.question_waiting().exists()
+    questions.answered(channel, "2")
+    assert not Home.question_waiting().exists()

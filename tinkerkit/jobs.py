@@ -16,6 +16,7 @@ lazy from .memory.memories import Scratchpad
 lazy from .messages import say
 lazy from .settings import (
     DREAM_IDLE_SECONDS,
+    DREAM_PROPOSAL_HOLD_SECONDS,
     EXERCISE_ENV,
     HOME_ENV,
     JOB_START_TRIES,
@@ -125,12 +126,20 @@ class Runner:
             return
         if cls.idle_since is None:
             cls.idle_since = now
-        if now - cls.idle_since < DREAM_IDLE_SECONDS:
+        if now - cls.idle_since < DREAM_IDLE_SECONDS or cls.question_held():
             return
         if model := cls.calibration_wanted():
             cls.queue_idle_job(["model", "calibrate", model])
         elif Scratchpad.fresh():
             cls.queue_idle_job(["dream", "run"])
+
+    @staticmethod
+    def question_held():
+        try:
+            asked = Home.question_waiting().stat().st_mtime
+        except FileNotFoundError:
+            return False
+        return time.time() - asked < DREAM_PROPOSAL_HOLD_SECONDS
 
     @classmethod
     def queue_idle_job(cls, argv):

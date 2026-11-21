@@ -241,8 +241,52 @@ def test_a_skipped_confirm_keeps_its_traits_candidates(home_store, monkeypatch):
     tabs = trait("uses tabs")
     ask("Do you use tabs?", "confirm", traits=[tabs["id"]])
     replying(monkeypatch, {"thought": "", "add": [], "questions": [], "done": True})
-    assert Interview().skipped("1") == Turn(opening(Questions().next()), False)
+    assert Interview().skipped("1") == Turn(ALL_FOR_NOW, True)
     assert [t["status"] for t in Traits().all()] == ["candidate"]
+
+
+def reflection_asking(monkeypatch, text):
+    question = {"about": "person", "text": text, "thought": "You never said.", "expected": "Yes."}
+    return replying(monkeypatch, {"thought": "", "add": [], "questions": [question], "done": False})
+
+
+@pytest.mark.spec("INT-4")
+def test_with_only_skipped_questions_pending_a_skip_opens_a_reflection_round(home_store, monkeypatch):
+    ask("When do you write Rust?")
+    asked = reflection_asking(monkeypatch, "Do you code at night?")
+    kept = {"text": "Do you code at night?", "thought": "You never said.", "expected": "Yes."}
+    assert Interview().skipped("1") == Turn(opening(kept), False)
+    assert [messages[0]["content"] for messages in asked] == [Prompts.REFLECT_SYSTEM]
+
+
+@pytest.mark.spec("INT-4")
+def test_a_question_skipped_in_this_dialogue_is_not_opened_again_in_it(home_store, monkeypatch):
+    first = ask("When do you write Rust?")
+    ask("Which editor do you use?")
+    replying(monkeypatch, {"thought": "", "add": [], "questions": [], "done": True})
+    interview = Interview()
+    assert interview.opened("1") == Turn(opening(first), False)
+    interview.skipped("1")
+    assert interview.skipped("1") == Turn(ALL_FOR_NOW, True)
+
+
+@pytest.mark.spec("INT-4")
+def test_a_new_dialogue_opens_a_question_skipped_in_an_earlier_one(home_store, monkeypatch):
+    first = ask("When do you write Rust?")
+    replying(monkeypatch, {"thought": "", "add": [], "questions": [], "done": True})
+    interview = Interview()
+    interview.opened("1")
+    interview.skipped("1")
+    assert interview.opened("1") == Turn(opening(first), False)
+
+
+@pytest.mark.spec("INT-4")
+def test_a_skip_in_one_chat_leaves_the_question_open_in_another(home_store, monkeypatch):
+    first = ask("When do you write Rust?")
+    replying(monkeypatch, {"thought": "", "add": [], "questions": [], "done": True})
+    interview = Interview()
+    interview.skipped("1")
+    assert interview.turn("2") == Turn(opening(first), False)
 
 
 def shown_then_outranked(interview):

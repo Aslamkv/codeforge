@@ -13,11 +13,13 @@ from ..settings import (
     EPISODES_KEPT_BYTES,
     NOTE_SAME_WORDS,
     NOTES_KEPT_BYTES,
+    PRESENT_WHENS,
     QUESTION_SAME_MEANING,
     RECALL_MEANING,
     RECALL_SHOWN,
     SAME_FACT_SIMILARITY,
     SAME_MEANING,
+    TRAIT_OBVIOUS_SOURCES,
     TRAITS_CHARS,
     Home,
     Numbered,
@@ -102,6 +104,12 @@ class Scratchpad:
             )
 
     @classmethod
+    def fail(cls, episode_id):
+        episode = Home.store().get(cls.EPISODES, episode_id)
+        if episode and not episode["dreamt"]:
+            Home.store().update(cls.EPISODES, episode_id, failed)
+
+    @classmethod
     def prune(cls):
         dreamt = sorted(
             (episode for episode in Home.store().items(cls.EPISODES).values() if episode["dreamt"]),
@@ -113,6 +121,10 @@ class Scratchpad:
                 return
             Home.store().delete(cls.EPISODES, oldest["id"])
             size -= len(json.dumps(oldest))
+
+
+def failed(episode):
+    return episode if episode["dreamt"] else dict(episode, status="failed")
 
 
 class Notes:
@@ -172,7 +184,8 @@ class Memories:
         return memory
 
     def add_starter_tools(self):
-        kept = {memory["text"] for memory in self.living() if memory["kind"] == "tool"}
+        stored = Home.store().items(self.MEMORIES).values()
+        kept = {memory["text"] for memory in stored if memory["kind"] == "tool"}
         for gist, line in STARTER_TOOLS:
             if line not in kept:
                 self.add("tool", gist=gist, text=line, sources=["starter"])
@@ -200,6 +213,18 @@ class Memories:
 
     def living(self):
         return [memory for memory in Home.store().items(self.MEMORIES).values() if not memory["retired"]]
+
+    def most_alike(self, kind, gist, text):
+        same_kind = [memory for memory in self.living() if memory["kind"] == kind]
+        likeness = self.retriever.likeness() if self.retriever else WordsLikeness()
+        closes = likeness.to(
+            likeness_text(gist, text),
+            [likeness_text(memory["gist"], memory["text"]) for memory in same_kind],
+            SAME_FACT_SIMILARITY,
+            SAME_MEANING,
+        )
+        alike = [(close, memory) for close, memory in zip(closes, same_kind) if close]
+        return max(alike, key=lambda pair: pair[0], default=(0.0, None))[1]
 
     def hits(self, request, texts):
         by_words = self.retriever.by_words(request, texts)
@@ -262,7 +287,7 @@ class Traits:
         return trait is not None and trait["status"] != "retired"
 
     def add(self, delta, at):
-        if not delta.get("sources"):
+        if not delta.get("sources") or names_the_present(delta.get("when", "")):
             return None
         alike = self.most_alike(delta.get("when", ""), delta["do"])
         if alike:
@@ -308,7 +333,7 @@ class Traits:
             "when": delta.get("when", ""),
             "do": delta["do"],
             "gist": "",
-            "status": "confirmed" if confirmed else "candidate",
+            "status": "confirmed" if confirmed or rests_on_episodes(sources) else "candidate",
             "sources": list(dict.fromkeys(sources)),
             "history": [history],
         }
@@ -339,17 +364,15 @@ class Traits:
         return self.sourced(delta, at, "confirm", {"status": "confirmed"})
 
     def sourced(self, delta, at, event, changes):
-        if not delta.get("sources"):
+        sources = [source for source in delta.get("sources") or [] if source != delta["id"]]
+        if not sources:
             return None
         return self.changed(
             delta["id"],
             at,
             event,
-            " ".join(delta["sources"]),
-            lambda trait: {
-                "sources": list(dict.fromkeys(trait["sources"] + list(delta["sources"]))),
-                **changes,
-            },
+            " ".join(sources),
+            lambda trait: sourced_changes(list(dict.fromkeys(trait["sources"] + sources)), changes),
         )
 
     def reject(self, delta, at):
@@ -514,6 +537,11 @@ class Questions:
             question_id, lambda question: {"status": "answered", "answer": text, "at": stamp(now)}
         )
 
+    def drop(self, question_id, why, now=None):
+        return self.changed(
+            question_id, lambda question: {"status": "dropped", "answer": why, "at": stamp(now)}
+        )
+
     def skip(self, question_id, now=None):
         return self.changed(
             question_id,
@@ -550,6 +578,21 @@ class Questions:
 
 def likeness_text(when, do):
     return f"{when} {do}".strip()
+
+
+def sourced_changes(sources, changes):
+    obvious = {"status": "confirmed"} if rests_on_episodes(sources) else {}
+    return {"sources": sources, **obvious, **changes}
+
+
+def rests_on_episodes(sources):
+    episodes = {source for source in sources if re.fullmatch(r"e\d+", source)}
+    return len(episodes) >= TRAIT_OBVIOUS_SOURCES
+
+
+def names_the_present(when):
+    phrases = "|".join(re.escape(phrase) for phrase in PRESENT_WHENS)
+    return re.search(rf"\b({phrases})\b", when, re.IGNORECASE) is not None
 
 
 class WordsLikeness:

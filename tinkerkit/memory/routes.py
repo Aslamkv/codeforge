@@ -3,9 +3,16 @@ from pathlib import Path
 from typing import NamedTuple
 
 from ..messages import say
-from ..settings import EVENTS_KEPT_PER_ITEM, ROUTE_CORRECTION_SECONDS, ROUTE_SAME_WORDS, Home
-from ..text import similarity
-from .memories import counted, history_entry, stamp
+from ..ranking import Retriever
+from ..settings import (
+    EVENTS_KEPT_PER_ITEM,
+    ROUTE_COMMON_WORDS,
+    ROUTE_CORRECTION_SECONDS,
+    ROUTE_SAME_WORDS,
+    Home,
+)
+from ..text import words
+from .memories import Memories, Scratchpad, counted, history_entry, stamp
 
 SAID_FILLER = tuple(
     "the my please can could would you tinker a an me now just show see view display what is it s usage".split()
@@ -16,6 +23,8 @@ TRAILING_PUNCTUATION = ".,!?;:)'\""
 INSTRUCT = "/instruct"
 CANCEL = "/cancel"
 CONFIRM = "/confirm"
+LEAVE = "/leave"
+PROPOSAL_ANSWERS = ([CONFIRM], [CANCEL], [LEAVE])
 
 
 class Matched(NamedTuple):
@@ -213,11 +222,24 @@ class Routes:
         return Matched(route, line) if line else None
 
     def most_alike(self, pattern):
-        scored = [(similarity(pattern, route["pattern"]), route) for route in self.living()]
+        scored = [(content_likeness(pattern, route["pattern"]), route) for route in self.living()]
         best = max((score for score, _ in scored), default=0)
         tied = [route for score, route in scored if score == best]
-        sure = best >= ROUTE_SAME_WORDS and len({route["line"] for route in tied}) == 1
+        sure = same_words(best) and len({route["line"] for route in tied}) == 1
         return tied[0] if sure else None
+
+
+def content_likeness(pattern, other):
+    mine, theirs = content_words(pattern), content_words(other)
+    return len(mine & theirs) / len(mine | theirs) if mine and theirs else 0
+
+
+def content_words(pattern):
+    return set(words(pattern)) - ROUTE_COMMON_WORDS
+
+
+def same_words(score):
+    return score >= ROUTE_SAME_WORDS
 
 
 def route_number(route):
@@ -279,11 +301,21 @@ class RouteFeedback:
         del self.last[chat]
         self.routes.apply(self.retired(last, "no"), now)
 
+    def exited_nonzero(self, chat, now):
+        last = self.last.get(chat)
+        if last is None or last.confirmed:
+            return
+        del self.last[chat]
+        self.routes.apply(self.retired(last, "exited nonzero"), now)
+
     def heard(self, chat, text, now):
         if self.proposes(chat) or text.split() in ([CONFIRM], [CANCEL]):
             return
         last = self.last.get(chat)
         if last is None or (instructs(last.line) and text.split() == [CANCEL]):
+            return
+        if instructs(last.line) and text.split() == [LEAVE]:
+            self.refused(chat, now)
             return
         del self.last[chat]
         if is_correction(text) and (now - last.at).total_seconds() <= ROUTE_CORRECTION_SECONDS:
@@ -308,7 +340,55 @@ class RouteFeedback:
         return [{"op": "add", "pattern": last.pattern, "line": last.line, "source": "model"}]
 
 
+class KeptEpisode(NamedTuple):
+    episode_id: str
+    pattern: str
+    at: object
+    memory_id: str
+
+
+class ChatEpisodes:
+    def __init__(self, known):
+        self.known = known
+        self.since_heard = {}
+
+    def kept(self, chat, episode_id, text, now, memory_id=""):
+        episode = KeptEpisode(episode_id, mask(text, self.known()).pattern, now, memory_id)
+        self.since_heard.setdefault(chat, []).append(episode)
+
+    def fail(self, chat):
+        failed(self.since_heard.pop(chat, []))
+
+    def ids(self, chat):
+        return [episode.episode_id for episode in self.since_heard.get(chat, [])]
+
+    def heard(self, chat, text, now):
+        kept = self.since_heard.pop(chat, [])
+        if (
+            kept
+            and (now - kept[-1].at).total_seconds() <= ROUTE_CORRECTION_SECONDS
+            and self.undoes(kept[0], text)
+        ):
+            failed(kept)
+
+    def undoes(self, first, text):
+        return is_correction(text) or self.repeats(first, text)
+
+    def repeats(self, first, text):
+        pattern = mask(text, self.known()).pattern
+        return bool(pattern and first.pattern) and same_words(content_likeness(pattern, first.pattern))
+
+
+def failed(episodes):
+    for episode in episodes:
+        Scratchpad.fail(episode.episode_id)
+        if episode.memory_id:
+            Memories(Retriever(None)).retire(episode.memory_id, "turned down")
+
+
 def is_correction(text):
+    if text.split() in PROPOSAL_ANSWERS:
+        return False
     words = text.lower().split()
     first = words[0].strip(TRAILING_PUNCTUATION) if words else ""
     return text.startswith("/") or first == "no" or words[:2] == ["i", "meant"]

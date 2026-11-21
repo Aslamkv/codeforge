@@ -80,6 +80,34 @@ def test_fresh_episodes_are_the_ones_not_dreamt(home_store):
     assert [episode["id"] for episode in Scratchpad.fresh()] == ["e2"]
 
 
+@pytest.mark.spec("REM-1")
+def test_fail_marks_a_fresh_episode_failed(home_store):
+    Scratchpad.write(chat_episode(), NOW)
+
+    Scratchpad.fail("e1")
+
+    assert home_store.get("episodes", "e1")["status"] == "failed"
+    assert home_store.get("episodes", "e1")["message"] == "list the files"
+
+
+@pytest.mark.spec("REM-1")
+def test_fail_leaves_a_dreamt_episode_as_it_is(home_store):
+    Scratchpad.write(chat_episode(), NOW)
+    Scratchpad.dreamt(["e1"], NOW)
+    dreamt = home_store.get("episodes", "e1")
+
+    Scratchpad.fail("e1")
+
+    assert home_store.get("episodes", "e1") == dreamt
+
+
+@pytest.mark.spec("REM-1")
+def test_fail_of_a_missing_episode_writes_nothing(home_store):
+    Scratchpad.fail("e9")
+
+    assert home_store.items("episodes") == {}
+
+
 @pytest.mark.spec("REM-2")
 def test_a_dreamt_episode_keeps_only_its_gist(home_store):
     long = "y" * (EPISODE_GIST_CHARS * 3)
@@ -278,6 +306,33 @@ def test_a_trait_the_person_said_is_added_confirmed(home_store):
     assert Traits().candidates() == []
 
 
+@pytest.mark.spec("REM-5", "REM-14")
+def test_an_add_resting_on_three_episodes_is_confirmed_and_other_ids_do_not_count(home_store):
+    obvious, unclear = Traits().apply(
+        [
+            add_trait(sources=["e1", "e2", "e3"]),
+            add_trait("Plays chess", sources=["e1", "e2", "m3", "q4", "t5"]),
+        ],
+        NOW,
+    )
+
+    assert obvious["status"] == "confirmed"
+    assert obvious["history"] == [{"event": "add", "at": "2026-11-11T12:00:00", "text": "Writes Rust daily"}]
+    assert unclear["status"] == "candidate"
+
+
+@pytest.mark.spec("REM-5", "REM-14")
+def test_a_support_bringing_a_candidate_to_three_episodes_confirms_it(home_store):
+    Traits().apply([add_trait(sources=["e1"])], NOW)
+
+    (short,) = Traits().apply([{"op": "support", "id": "t1", "sources": ["m2", "e2"]}], NOW)
+    (obvious,) = Traits().apply([{"op": "support", "id": "t1", "sources": ["e3"]}], NOW)
+
+    assert short["status"] == "candidate"
+    assert obvious["status"] == "confirmed"
+    assert obvious["history"][-1] == {"event": "support", "at": "2026-11-11T12:00:00", "text": "e3"}
+
+
 @pytest.mark.spec("REM-14")
 def test_support_adds_only_new_sources_to_the_history(home_store):
     Traits().apply([add_trait()], NOW)
@@ -286,6 +341,44 @@ def test_support_adds_only_new_sources_to_the_history(home_store):
 
     assert supported["sources"] == ["e1", "e7"]
     assert supported["history"][-1] == {"event": "support", "at": "2026-11-11T12:00:00", "text": "e1 e7"}
+
+
+@pytest.mark.spec("REM-14")
+def test_a_trait_never_cites_itself(home_store):
+    Traits().apply([add_trait(), add_trait("Plays chess")], NOW)
+
+    (supported,) = Traits().apply([{"op": "support", "id": "t1", "sources": ["t1", "e7"]}], NOW)
+    dropped = Traits().apply(
+        [{"op": "support", "id": "t2", "sources": ["t2"]}, {"op": "confirm", "id": "t2", "sources": ["t2"]}],
+        NOW,
+    )
+    (alike,) = Traits().apply(
+        [add_trait("Writes Rust daily", sources=["t1"]), add_trait(sources=["t1", "e8"])], NOW
+    )
+
+    assert supported["sources"] == ["e1", "e7"]
+    assert supported["history"][-1]["text"] == "e7"
+    assert dropped == []
+    assert home_store.get("traits", "t2")["history"][-1]["event"] == "add"
+    assert alike["sources"] == ["e1", "e7", "e8"] and alike["history"][-1]["text"] == "e8"
+
+
+@pytest.mark.spec("REM-14")
+@pytest.mark.parametrize(
+    "when",
+    ["now", "Right now", "currently", "today", "at the moment", "when tired today", "Currently, at work"],
+)
+def test_an_add_whose_when_names_the_present_is_dropped(home_store, when):
+    assert Traits().apply([add_trait(when=when)], NOW) == []
+    assert Traits().all() == []
+
+
+@pytest.mark.spec("REM-14")
+@pytest.mark.parametrize("when", ["", "on weekends", "when nowhere to go", "knows the moment"])
+def test_an_add_whose_when_only_resembles_the_present_is_kept(home_store, when):
+    (added,) = Traits().apply([add_trait(when=when)], NOW)
+
+    assert added["when"] == when
 
 
 @pytest.mark.spec("REM-5", "REM-14")
@@ -870,6 +963,31 @@ def test_answer_or_skip_of_an_unknown_or_answered_question_changes_nothing(home_
     assert list(home_store.items("questions")) == ["q1"]
 
 
+@pytest.mark.spec("REM-15")
+def test_a_dropped_question_keeps_its_why_and_leaves_the_pending_ones(home_store):
+    ask("Which editor do you use at work?", now=NOW)
+
+    dropped = Questions().drop("q1", "asked already", NOW)
+
+    assert dropped["status"] == "dropped" and dropped["answer"] == "asked already"
+    assert dropped["at"] == "2026-11-11T12:00:00"
+    assert Questions().pending() == [] and Questions().next() is None
+
+
+@pytest.mark.spec("REM-15")
+def test_drop_of_an_unknown_answered_or_dropped_question_changes_nothing(home_store):
+    ask("Which editor do you use at work?", now=NOW)
+    ask("Which language do you write?", now=NOW)
+    Questions().answer("q1", "Helix", NOW)
+    Questions().drop("q2", "asked already", NOW)
+
+    assert Questions().drop("q9", "why", NOW) is None
+    assert Questions().drop("q1", "why", NOW) is None
+    assert Questions().drop("q2", "why", NOW) is None
+    assert home_store.get("questions", "q1")["status"] == "answered"
+    assert home_store.get("questions", "q2")["answer"] == "asked already"
+
+
 @pytest.mark.spec("REM-3")
 def test_update_changes_a_memory_and_retire_says_why(home_store):
     memories().add("fact", "Repo", "The repo is codeforge.", ["e1"], NOW)
@@ -940,6 +1058,17 @@ def test_a_starter_tool_already_kept_by_its_line_is_not_added_again(home_store):
 
     assert [memory["text"] for memory in memories().living()].count(line) == 1
     assert len(starter_tools()) == len(STARTER_TOOLS) - 1
+
+
+@pytest.mark.spec("INS-2")
+def test_a_retired_starter_tool_stays_retired_on_the_next_start(home_store):
+    memories().add_starter_tools()
+    retired = starter_tools()[0]
+    memories().retire(retired["id"], "not wanted")
+
+    memories().add_starter_tools()
+
+    assert retired["text"] not in [memory["text"] for memory in memories().living()]
 
 
 @pytest.mark.spec("INS-9")

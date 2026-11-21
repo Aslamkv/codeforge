@@ -443,6 +443,14 @@ def test_the_answer_prompt_only_talks_and_points_actions_to_instruct():
 
 
 @pytest.mark.spec("CNV-18")
+def test_the_answer_prompt_never_claims_memory_changed():
+    chat = Prompts.CHAT_SYSTEM.format(style=Prompts.PHONE_STYLE, state="")
+    assert "Never say you remembered, noted or updated anything" in chat
+    assert "only a dream changes what you remember" in chat
+    assert chat.index("only a dream") < chat.index("`/instruct`")
+
+
+@pytest.mark.spec("CNV-18")
 def test_the_answer_prompts_instruct_pointer_is_its_last_rule():
     chat = Prompts.CHAT_SYSTEM.format(style=Prompts.PHONE_STYLE, state="")
     assert chat.endswith("followed by what to do.")
@@ -557,8 +565,32 @@ def test_the_interact_talk_prompt_keeps_question_null_without_a_follow_up_and_se
         "amend and add, and question null." in prompt
     )
     assert (
-        "A request about this talk is not a trait: it gives empty confirm, reject, amend and add." in prompt
+        "A request about this talk itself (ask less, change the topic) is not a trait: it gives empty "
+        "confirm, reject, amend and add, and settled true" in prompt
     )
+    assert "a lasting wish for how Tinker answers, such as short answers, is a trait" in prompt
+
+
+@pytest.mark.spec("INT-3")
+def test_the_interact_talk_prompt_never_reads_the_present_as_when():
+    prompt = " ".join(Prompts.INTERACT_TALK_SYSTEM.split())
+
+    assert '"when":"the situation it holds in, or empty"' in prompt
+    assert "when it holds now" not in prompt
+    assert "the habit it holds now" not in prompt
+    assert 'A when is never the present ("now", "currently")' in prompt
+
+
+@pytest.mark.spec("INT-3")
+def test_the_interact_talk_prompt_keeps_tinkers_workings_out_of_say_and_speaks_to_the_person():
+    prompt = " ".join(Prompts.INTERACT_TALK_SYSTEM.split())
+
+    assert (
+        "Your say never names Tinker's workings (traits, candidates, episodes, deltas, recording) nor what "
+        "Tinker can or cannot change about its asking, and never repeats the message back" in prompt
+    )
+    assert 'thought, text and expected speak to the person as "you", never "the user"' in prompt
+    assert "A follow-up question is never the person's own message" in prompt
 
 
 @pytest.mark.spec("REF-3")
@@ -568,11 +600,15 @@ def test_the_reflect_prompt_holds_tinkers_purpose_lasting_traits_and_what_not_to
     assert " ".join(Prompts.TINKER_PURPOSE.split()) in prompt
     assert "builds only what the request clearly asks for" in Prompts.TINKER_PURPOSE
     assert "A trait is lasting" in prompt and "never a passing state" in prompt
+    assert "gists of recent episodes" not in prompt
+    assert "the person's own words in recent episodes that did not fail, never Tinker's reply" in prompt
     assert "12 questions waiting is plenty" in prompt and "never a reason to stop" in prompt
     assert "a question like one waiting" in prompt and "a trait the person retired" in prompt
     assert "nor what an asked question or a known trait already covers, even in other words" in prompt
     assert "the questions the person already answered, with the answers" in prompt
     assert "Never ask an answered question again, in any words" in prompt
+    assert '"drop":[{"id":"a pending question id","why":' in prompt
+    assert "Drop a pending question that repeats another or that a known trait already covers" in prompt
     assert "in two or three sentences" in prompt
     assert '"text":"a short question, shown to the person in plain words, naming no id"' in prompt
     assert '"thought":"why you ask, shown to the person in plain words, naming no id"' in prompt
@@ -594,6 +630,10 @@ def test_the_merge_traits_prompt_says_the_traits_come_newest_first():
 
     assert "The traits come newest first" in prompt
     assert "where they disagree, the newer wording wins" in prompt
+    assert (
+        "The joined trait keeps every detail of each (a tool, a name, a number) unless a newer one contradicts it"
+        in prompt
+    )
 
 
 @pytest.mark.spec("DRM-13")
@@ -610,11 +650,20 @@ def test_the_dream_traits_prompt_asks_for_lasting_traits_each_with_a_question_th
     prompt = " ".join(Prompts.DREAM_TRAITS_SYSTEM.split())
 
     assert "suggestions" not in prompt
+    assert "gist" not in prompt
+    assert "the person's own words in the episodes that did not fail, never Tinker's reply" in prompt
     assert "A trait is lasting (work, goals, likes, ways of working)" in prompt
     assert "never a passing state (the folder, the time, one command's output)" in prompt
+    assert '"stated":true|false' in prompt
+    assert "stated is true when the person said the trait in their own words, then it is not asked" in prompt
     assert (
         '"question":"a short question the person answers to confirm it, shown to the person in plain words, '
         'naming no id"' in prompt
     )
     assert '"thought":"why you ask, shown to the person in plain words, naming no id"' in prompt
     assert '"expected":"your guess at the answer, shown to the person in plain words, naming no id"' in prompt
+    assert (
+        '"change":[{"id":"t1","when":"the situation, or empty","do":"the trait as the person now says it"'
+        in prompt
+    )
+    assert "Change a known trait only when the person's own words now say otherwise" in prompt

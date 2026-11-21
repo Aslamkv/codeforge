@@ -519,7 +519,8 @@ starts, watches and signals: it never blocks Tinker, and it outlives it.
   putting back the backups of what it touches (nothing to undo when it touches nothing), never as ⚠️ "can't be
   undone", which only the model's own `can't be undone` or **INS-3** gives. All four are shown, the line as a guess
   ("I think you meant to do it like this:", the line in a code block, "Am I right?") above the rest, and the line
-  waits for `/confirm` (**CNV-10**) unless it runs at once (**INS-9**). A message sent while a line waits cancels it quietly and is the amend. A reply that
+  waits for `/confirm` (**CNV-10**) unless it runs at once (**INS-9**). A message sent while a line waits, other than a yes or no in words (**CNV-10**), cancels it quietly and is the amend, but for the first proposal of a routed
+  `/instruct`, which a plain message leaves (**CNV-18**). A reply that
   cannot be read (**PRM-2**) gives no line and says the model's answer could not be read, never that no command
   was found. An empty or multi-line line gives no line and says so, as does a line whose first word is no command (not
   found on `PATH`, not a shell builtin or keyword), such as the model's prose. The prompt always asks for a line:
@@ -539,8 +540,8 @@ starts, watches and signals: it never blocks Tinker, and it outlives it.
 - **INS-4** `/confirm` starts the line (`Run.start`) in run folder `instruction/N/R/` (a Home method, **ARCH-4**):
   `run.sh` (the line run in the instruction's folder with `set -o pipefail`, so a pipe whose part fails ends with
   that failure, runnable by hand), `output.log`, `state` (pid, start time),
-  `ended` (exit code) and `folder` (where it ended), both written by the run itself, `stopped` after a stop (**INS-6**), and the backups: each existing path in `touches` cloned with `cp -c`; past `BACKUP_MAX_BYTES` (1 GB)
-  none is made and the run is irreversible. The process starts in a session of its own (`start_new_session`),
+  `ended` (exit code) and `folder` (where it ended), both written by the run itself, `stopped` after a stop (**INS-6**), and the backups: each existing path in `touches` cloned with `cp -c`; past `BACKUP_MAX_BYTES` (1 GB),
+  or when a path in `touches` can't be read while sizing, none is made and the run is irreversible. The process starts in a session of its own (`start_new_session`),
   stdin `/dev/null`, kept awake by `caffeinate -w PID` (**SET-10**), and starting returns at once. Nothing is
   written where the line runs. A line that needs a terminal or input fails, and Tinker says why: a run's output
   is kept without terminal escape sequences, and a failed run whose output set terminal modes (a private-mode
@@ -559,7 +560,7 @@ starts, watches and signals: it never blocks Tinker, and it outlives it.
 - **INS-7** `/undo` inside an instruction undoes its last run not undone yet (a stack): it stops a live one first,
   then a preview lists the backups put back (each path changed since the run marked as overwritten) and the undo
   line, and waits for `/confirm`. With nothing to undo, or an irreversible run (an **INS-3** irreversible line, or
-  no backups past `BACKUP_MAX_BYTES`), it says so; a run whose undo is the model's `can't be undone` puts back its
+  no backups past `BACKUP_MAX_BYTES` or for a path it could not read), it says so; a run whose undo is the model's `can't be undone` puts back its
   backups with no undo line, and one with neither backups nor an undo line has nothing to undo and is never on the
   stack. An irreversible run, once refused, is passed (marked so), so the next `/undo` reaches an older run. The undo
   line's own run is never on the stack, so each further `/undo` reaches an older run; an undo with no line logs no
@@ -569,10 +570,11 @@ starts, watches and signals: it never blocks Tinker, and it outlives it.
   at once (**INS-9**) are not. Being inside an instruction does not outlive a restart.
 - **INS-9** A proposed line that is read-only (**INS-3**) and has the shape of a recalled `tool` memory's line
   (the same words once path arguments, words holding `/` or `~` or naming an existing path, are left out of both)
-  runs at once, with no `/confirm`: it is shown as "Running:" and the line, and its run is like a confirmed one.
+  runs at once, with no `/confirm`: it is shown as "Running:" and the line, and its run is like a confirmed one but makes no backups.
   Any other line is a guess that waits. Tinker's starter `tool` memories (`STARTER_TOOLS`: read-only lines for
   free disk space, a folder's size, files by size, the biggest files, counting files and the like, source
-  `starter`) are added to the store on a start that lacks them (matched by text).
+  `starter`) are added to the store on a start that lacks them (matched by text, a retired one included, so a
+  retired starter stays retired).
 
 ## chat.ledger (LED)
 
@@ -1263,7 +1265,13 @@ The terminal and the chats are one conversation: the same commands, the same ans
   other conversation, another chat on the same channel too, sees only the status.
 - **CNV-10** Each chat has at most one question that waits for the person (a deletion, a chat's `/exit`, an
   instruction's proposal, words a command needs), kept in one place by channel and chat:
-  what its answer runs and what a cancel says. `Desk.settle` runs what waits for a `/confirm`. Any other message
+  what its answer runs and what a cancel says. `Desk.settle` runs what waits for a `/confirm`. A yes or no in
+  words answers it too: a message whose words, lowercased and without punctuation, are one of `CONFIRM_WORDS`
+  (`yes`, `y`, `ok`, `okay`, `sure`, `yep`, `yeah`, `go ahead`, `do it`) is `/confirm`, and one of `CANCEL_WORDS`
+  (`no`, `n`, `nope`, `cancel`, `dont`) is `/cancel`, so a yes runs the line and is never answered by the chat
+  model; with no question waiting such a message is a plain one, and a question waiting for words (**CNV-11**)
+  takes it as its words. Neither a dream nor any job cancels or answers a
+  waiting question: it waits however long the person takes. Any other message
   cancels it and says so at once, before that message is answered; a question with nothing to say on a cancel
   (words a command needs) is dropped quietly, and so is a proposal a message inside its instruction cancels, that
   message being the amend (**INS-2**). The plan that waits is not such a question: every chat and
@@ -1327,13 +1335,15 @@ The terminal and the chats are one conversation: the same commands, the same ans
   something away from this computer) is `none`. A routed `/instruct MESSAGE` enters the
   instruction like a typed one, and its proposal is the guess (**INS-2**): a `/cancel` of that first proposal
   shows `🚫 Not run` and leaves the instruction, and nothing more is said about the message: no answer in
-  words follows. A line names the command (or
+  words follows. A plain message (not a yes or no in words, **CNV-10**) while that first proposal waits drops it, leaves the instruction, is a no for
+  the route (**RTE-7**), and is then taken as a new chat message. A line names the command (or
   skill) its leading words name, with or without `/`; words after the name are ignored (`skill learn mgen` names
   `/skill`, `runs` names `/runs`). A reply with a line that names none is read as `none`. With
   `none`, the answer call (`CHAT_SYSTEM`) holds the style and the live state only when there is some: what
   runs now and the plan that waits, and no commands but `/instruct`: it says nothing runs there, so the answer never
   claims an action and never gives shell commands to run, and points to `/instruct` for one, as the prompt's
-  last rule; a plain question is answered there, at the message's
+  last rule, and that the answer never claims to have remembered, noted or updated anything (only a dream changes
+  memory); a plain question is answered there, at the message's
   level (**RVW-3**). When it thinks, its `num_predict` is the reply budget plus a thinking budget; an empty
   answer after a stop at length is asked once more without thinking, and an answer cut off at length is shown
   but kept as no episode (**REM-1**). A named command that takes no
@@ -1780,8 +1790,15 @@ Nothing here calls the model.
   `routed` (chosen, never counted as run), the learned route used as `route` (its id, or `""`, **RTE-4**), the reply, and `answered`,
   `remembered` (answered from memory, **REM-12**) or `failed`), each instruction run once it ends (**INS-4**: the request, the line, its output cut the same way, its
   exit code), and each build when it ends (its task and status); a chat answer cut off at length is not kept
-  (**CNV-18**). An episode has the next id `eN`, its chat, its time
+  (**CNV-18**). A routed `/instruct` is one chat request and keeps one chat episode, as a typed one does. An episode has the next id `eN`, its chat, its time
   and `dreamt` false. A `system` check's output (**SYS-1**) is never kept.
+  A chat episode is `failed` when the model gave no reply, when its command found nothing (`No command found`),
+  when its proposal was turned down (a no or an amend, **RTE-6**), when its `/instruct`, typed or routed, was
+  left or cancelled before its line ran (**CNV-18**), when a line it routed or its `/instruct` proposed could not
+  start or exited nonzero, or
+  when the chat's next message within `ROUTE_CORRECTION_SECONDS` corrects it (**RTE-7**) or repeats it (alike as
+  routes match, **RTE-4**). What comes after marks the fresh episode `failed` (`Scratchpad.fail(id)`); a dreamt
+  episode is left as it is.
 - **REM-2** A dreamt episode keeps only its gist: the gist the dream wrote for it (**DRM-3**), else its texts
   cut to `EPISODE_GIST_CHARS`. The dreamt episodes are kept by space, never by days: while their size (the length
   of each one's JSON) is over `EPISODES_KEPT_BYTES` (1 000 000), the oldest dreamt one is deleted. A fresh episode
@@ -1799,9 +1816,12 @@ Nothing here calls the model.
 - **REM-5** A trait in `traits` is `{id, about, when, do, gist, status, sources, history}`: id `tN`, `about`
   `person` (who the person is: work, goals, likes) or `tinker` (who Tinker is for them: role, duties, tone, how it
   builds), `when` the situation it holds in (`""` always), `do` the trait as said, `gist` its shortest wording
-  (**DRM-10**) or `""`, `sources` the episode, memory, question and teaching ids it rests on, `history` its
-  `{event, at, text}`. Its status is `candidate` (proposed by a dream, never shown to a model), `confirmed` (the
-  person said yes) or `retired` (with why). Only the person changes a status: a build never retires a trait.
+  (**DRM-10**) or `""`, `sources` the episode, memory, question and teaching ids it rests on (never its own id),
+  `history` its `{event, at, text}`. Its status is `candidate` (proposed by a dream, never shown to a model),
+  `confirmed` or `retired` (with why). Tinker decides what is obvious itself and asks only what is unclear: a trait
+  is confirmed when the person said yes, when the person stated it in their own words, or when it rests on at
+  least `TRAIT_OBVIOUS_SOURCES` (3) episodes. Only the person's own words retire a trait or change a confirmed one:
+  a build never does.
 - **REM-6** `Talk.reply` adds "What you remember" (each recalled line) to `CHAT_SYSTEM` only
   when there is some; `Shell.propose` adds the recalled `tool` memories (never episodes: the instruction's thread
   holds its own history) to `COMMAND_SYSTEM` the same way. With nothing recalled, the prompt is unchanged. The model answers unless an answer memory does (**REM-12**).
@@ -1829,22 +1849,27 @@ Nothing here calls the model.
   (alike, **KNW-11**); and every word of the message (lowercase, not in
   `ANSWER_COMMON_WORDS`) is in its question, so "feet" never finds "km". A match is the reply, with no model
   call: "💭 From memory (you asked "QUESTION" on DATE):", the answer and the `/fresh` hint (**CNV-24**). It counts
-  as recalled.
+  as recalled. When that remembered reply fails (**REM-1**: corrected or repeated), the answer memory is retired
+  "turned down".
 - **REM-13** When the model answers a message (no answer memory matched, **REM-12**, or `/fresh`, **CNV-24**), it
   is told no earlier answer to that question: the thread lines, recalled episodes and recalled answer memories
   whose question (an episode's message, a memory's gist) matches the message by the **REM-12** test are left
   out, in both calls and the review, so the answer is the model's own.
 - **REM-14** `Traits` changes only by deltas the code applies: `add` (a new candidate, or confirmed when the person
-  said it), `support` (id, sources), `confirm` (id, sources), `reject` (retired, with why), `amend` (id, new
+  said it or stated it), `support` (id, sources), `confirm` (id, sources), `reject` (retired, with why), `amend` (id, new
   `when`/`do`) and `merge` (ids, `when`, `do`; **DRM-12**). Each is added to the trait's history. A delta with an
-  unknown id, or an add, support or confirm with no source, is dropped. An add like a living trait
+  unknown id, or an add, support or confirm with no source, is dropped; a trait's own id is dropped from its
+  sources. An add whose `when` names the present (`now`, `right now`, `currently`, `today`, `at the moment`) is a
+  passing state and is dropped. A support that brings a candidate to `TRAIT_OBVIOUS_SOURCES` episode sources
+  confirms it. An add like a living trait
   (alike, **KNW-11**, on `when` and `do`: words `SAME_FACT_SIMILARITY` or meaning `SAME_MEANING`) supports it instead, and a confirmed add like a candidate confirms it
   too; one like a retired trait is dropped, so nothing is asked twice. A merge makes one trait with the union of
   their sources, confirmed when any of them was, and retires the old ones "merged into tN"; a pending confirm
   question about one of them asks about the merged trait instead.
 - **REM-15** A question in `questions` is `{id, kind, about, text, thought, expected, traits, sources, status, answer,
   at}`: id `qN`, kind `confirm` (of candidate `traits`) or `open`, `about` `person` or `tinker`, `thought` why Tinker
-  wonders, `expected` its guess at the answer, status `pending` or `answered`. An id the model named in its text,
+  wonders, `expected` its guess at the answer, status `pending`, `answered` or `dropped` (its answer the why,
+  **REF-1**). An id the model named in its text,
   thought or expected (`e12`, `m3`, `t4`, `q2`) is taken out on keeping, with the brackets and commas left empty
   around it, since the person never sees ids; a list of ids (`e1, e2, and e3`, "or" too) goes as one, and a lead
   word left dangling before a removed id at a clause's end (`in`, `from`, `of`, `by`, `see`, `at`, `per`, `on`,
@@ -1881,8 +1906,10 @@ model.
   `seed`, pattern the phrase and line `/PHRASE`, added only when no route (living or retired) has that pattern: a
   retired seed stays retired.
 - **RTE-4** `Routes.match(text, state)` masks the message and looks among the living routes (not retired) for its
-  pattern exactly, else for the most alike in words (alike, **KNW-11**, words only: at least `ROUTE_SAME_WORDS`,
-  0.9; no embedding call, **PRI-8**). Two best routes with different lines are unsure. A match gives the route and
+  pattern exactly, else for the most alike in content words: the masked words not in `ROUTE_COMMON_WORDS`
+  (asking and showing words such as `show`, `list`, `please`, `my`, `me`, `all`), the shared ones out of all of
+  both (Jaccard) at least `ROUTE_SAME_WORDS` (0.75), so `list my jobs please` finds `jobs` and `delete jobs` does
+  not; no embedding call (**PRI-8**). Two best routes with different lines are unsure. A match gives the route and
   its line with the values in; a miss or an unsure match goes to the model (**CNV-18**). A message that answers a
   waiting question is not matched.
 - **RTE-5** `Routes` changes only by deltas the code applies, each added to the route's history: `add` (a new
@@ -1895,15 +1922,18 @@ model.
   deletion is proposed before it runs, in plain words and never as command syntax: "I think you mean NAME: WHAT
   (VALUES). Shall I?", NAME the command's name without its slash and WHAT its `what` (with no `what`, "I think you
   mean NAME (VALUES). Shall I?"); a Telegram chat gets buttons ✅ Yes (`/confirm`) and ❌ No
-  (`/cancel`). The chat then waits for the answer (`WaitingRoute`). Yes runs the line; no shows `🚫 Not run`; a
-  plain message is an amend: the model routes again with the original message, the proposal and the amend, and its
+  (`/cancel`). The chat then waits for the answer (`WaitingRoute`). Yes (or a yes in words, **CNV-10**) runs the
+  line; no shows `🚫 Not run`; any other plain message is an amend: the model routes again with the original message, the proposal and the amend, and its
   new lines go through this rule again, learned under the original message's pattern; any answer to the amend ends
   it. A routed `/instruct` uses its own proposal (**INS-2**).
 - **RTE-7** What the person does teaches the routes. A yes, or a quiet yes (a glance or `none` that ran with no
-  correction, an `/instruct` whose first proposal was not cancelled), adds the line as a candidate (source `model`)
-  when no route gave it, and confirms the candidate that gave it. A no retires the candidate that gave it (a model
-  line keeps nothing), and so does an amend. A correction is the chat's next message within
-  `ROUTE_CORRECTION_SECONDS` (120) that is a `/command` or starts with `no` or `I meant`: it retires the route used
+  correction, an `/instruct` whose first proposal was neither cancelled nor left, **CNV-18**), adds the line as a
+  candidate (source `model`) when no route gave it, and confirms the candidate that gave it; a reply from memory
+  (**REM-12**) is no quiet yes and teaches no route. A no retires the candidate that gave it (a model line keeps
+  nothing), and so do an amend, a left routed `/instruct` and a routed line that ran and exited nonzero (no quiet
+  yes). A correction is the chat's next message within `ROUTE_CORRECTION_SECONDS` (120) that is a `/command`
+  other than `/confirm`, `/cancel` or `/leave` (they answer a proposal, never correct one) or starts with `no` or
+  `I meant`: it retires the route used
   (why: the correction), and a `/command` correction adds a candidate from the message's pattern to that line
   (source `correction`). A confirmed route's line runs at once and counts a use. A reply the model failed to give
   (the route or answer call returned an error) teaches nothing, and `/confirm` or `/cancel` with no proposal
@@ -1921,25 +1951,28 @@ Every dream reflects at its end (**DRM-11**), and the dialogue reflects live whe
 - **REF-1** A round is one call of `REFLECT_SYSTEM` given, as JSON: `person` and `tinker`, each with the confirmed
   traits, the candidates, the pending questions (text, thought, expected), the last `REFLECT_ANSWERED` (20)
   answered questions (text, answer), never to be asked again in other words, and the traits the person retired
-  with why; `evidence`, the gists of the last `REFLECT_EPISODES` (20) dreamt episodes (id, gist) and the living `person`
-  memories; `gaps` (**REF-4**); `self`, the measured facts and kept notes (**REF-5**); `thoughts`, this loop's so
+  with why; `evidence`, the person's own words (message, request or task; never Tinker's reply) of the last
+  `REFLECT_EPISODES` (20) episodes that did not fail (id, words) and the living `person` memories; `gaps` (**REF-4**); `self`, the measured facts and kept notes (**REF-5**); `thoughts`, this loop's so
   far and the last `REFLECT_THOUGHTS` (10) kept from earlier loops; and `waiting`, how many questions are pending.
   Each part is there only when it holds something. It reads `{thought, add: [{about, when, do, sources, question,
-  thought, expected}], questions: [{about, text, thought, expected}], notes: [text], retire: [{id, why}], learn,
-  done}`: each add is a candidate (**REM-14**) with its `confirm` question, each question an `open` one
+  thought, expected}], questions: [{about, text, thought, expected}], notes: [text], retire: [{id, why}], drop:
+  [{id, why}], learn, done}`: each drop is a pending question that repeats another or that a known trait already
+  covers, set `dropped` with its why (**REM-15**), any other id dropped; each add is a candidate (**REM-14**) with its `confirm` question, each question an `open` one
   (**REM-15**), both with the thought that led to it and `expected`, Tinker's guess at the answer; each note is kept
   (**REF-6**); each retire is a `retire` delta (**RTE-5**) of a living route named in `gaps`, any other id dropped;
   `learn` is a topic queued as `learn TOPIC` (**LRN**) at the queue's back (**JOB-8**), at most one per loop, the later ones dropped. The round's
   `thought` joins the loop's.
 - **REF-2** `Reflection.run()` makes rounds until one says `done`, or keeps nothing new (no question, note,
-  retire or learn), or `REFLECT_ROUNDS` (20) rounds are made. It gives back each round as it ends, with what that
+  retire, drop or learn), or `REFLECT_ROUNDS` (20) rounds are made. It gives back each round as it ends, with what that
   round kept and the loop's thoughts so far, its caller keeping the newest `REFLECT_THOUGHTS` for the next loop.
 - **REF-3** The prompt holds `TINKER_PURPOSE`, what Tinker is for in the words of [The idea](#the-idea); says a trait
   is lasting, never a passing state (as **DRM-6**); tells the model `REFLECT_WAITING` (12) questions waiting is
   plenty, as a guideline and never a block; that a question like one waiting, or about a trait the person retired,
   is not to ask again, nor one that an asked question or a known trait already covers, even in other words; asks for the `thought` in two or three sentences, so a reply never spends its budget on
   a thought that goes on; and says each question's text, thought and expected are shown to the person, in plain
-  words that name no id. Only when `gaps` is given does it say what a note, a retire and a learn are for: a note is
+  words that name no id, speak to the person as `you` and never name Tinker's workings (episodes, memories,
+  traits, candidates), and that a confirm question asks about the trait in Tinker's words, never the person's
+  message repeated. Only when `gaps` is given does it say what a note, a retire and a learn are for: a note is
   one short lasting observation of Tinker about itself, a retire is for a route that keeps going wrong, and a learn
   is for a topic Tinker lacked.
 - **REF-4** The gaps are found by code, with no model, newest first, at most `REFLECT_GAPS` (10) of each kind:
@@ -1964,9 +1997,12 @@ fade, the traits they show become candidates, and Tinker reflects on them (**REF
 the person (**INT**).
 
 - **DRM-1** The runner (**JOB-9**) queues `dream run` once the queue has been empty for `DREAM_IDLE_SECONDS`
-  (5) and a fresh episode is there. A chat's answer and the exercise are jobs, so a dream never runs over
-  them, and a dream pushed back goes on later (**JOB-2**). Only one dream is in the queue at a time.
-  `tinker dream run` queues one now.
+  (300) and a fresh episode is there, so a dream sees a quiet spell's episodes together. While a question waits
+  for the person (**CNV-10**), no dream is queued until `DREAM_PROPOSAL_HOLD_SECONDS` (600) have passed since it
+  was asked, so the person decides undisturbed; after that a dream may run, and the question still waits. A chat's answer and the
+  exercise are jobs, so a dream never runs over them, and a dream pushed back goes on later (**JOB-2**). Only one
+  dream is in the queue at a time. `tinker dream run` queues one now and, when it ends, says how many changes each
+  step made (as **DRM-8**).
 - **DRM-2** `Dream.run()` goes through its steps in turn, consolidate, revise, decay, traits, merge traits (**DRM-12**),
   merge principles (**DRM-13**), gists, reflect (**DRM-11**) and compact (**DRM-14**), each saved
   when done in `dream`/`state`, so a dream that goes on skips the steps done; its tracker's `doing` names the
@@ -1976,13 +2012,15 @@ the person (**INT**).
   Each episode of the batch keeps its id, chat and time and names who each other part came from: `person`
   holds what the person said (its message, request or task), `tinker` all Tinker said and did (its reply,
   commands, output, status), so a person memory rests only on the person's own words.
-  `DREAM_CONSOLIDATE_SYSTEM` gets the batch and the memories it recalls (**REM-4**), and answers JSON
+  `DREAM_CONSOLIDATE_SYSTEM` gets the batch and the memories it recalls (**REM-4**) but `answer` ones, which
+  only the code changes, and answers JSON
   `{add, update, confirm, retire, gists}`, each change citing episode ids of the batch; `gists` maps each
   episode id to a short gist keeping its numbers, names and conclusion (**REM-2**); an episode answered in words
   (no command run) is gisted as what Tinker said, never as an action it took, even when its reply names a
   command (`rm …` in a reply is advice, not "Deleted"); a routed episode is gisted as the command Tinker chose,
   never as its result. The code picks the episodes that
-  may become answers, a question answered in words (no command run, none routed, not answered from memory), and names them
+  may become answers, a question answered in words (no command run, none routed, no instruction proposed or run
+  (**INS-4**), not answered from memory, not failed), and names them
   in the batch as `questions`; the model gives each only its `lasts` (`{lasts: {id: lasts}}`): always for a fact
   that does not change (a mountain's height, a date in history), month for one that changes slowly (a price, a
   version), day for news or weather, never for what is read off right now (the time, the RAM). An id or value
@@ -1991,27 +2029,33 @@ the person (**INT**).
   memory already answers that message (**REM-12**), it is updated instead, with the new text and lasts. An add of
   kind `answer` from the model is dropped, and so is its update or retire of an `answer` memory; a plain question and answer makes no `person` memory; a change that
   cites none, or an id outside the batch, is dropped. An add starts at strength 1, a confirm adds 1 and makes `last_seen`
-  now; an update keeps its sources and adds the cited ones. A `tool` memory is kept only when `shutil.which`
+  now; an add like a living memory of its kind (alike, **KNW-11**: words `SAME_FACT_SIMILARITY` or meaning
+  `SAME_MEANING`) confirms that one instead, with the add's sources; an update keeps its sources and adds the cited ones.
+  A failed episode and an instruction run that exited nonzero are no source of a confirm (nor of an add that
+  confirms a like memory): they are left out of its sources, and a confirm with none left is dropped. A `tool` memory is kept only when `shutil.which`
   finds the tool. Then the batch is dreamt; a reply that cannot be read leaves it fresh.
 - **DRM-4** Revise joins similar memories (as **GRF-3**) of a group where one changed in this dream, never an
   `answer` memory (answers to near questions, feet and km, stay apart):
   `DREAM_REVISE_SYSTEM` answers `{merge: [{ids, kind, gist, text}], retire: [{id, why}]}`, the newer memory
-  winning where they disagree. A merged memory has the union of their sources, the earliest `first_seen` and
-  the sum of their strengths; the old ones are retired "merged into mN".
+  winning where they disagree. A merged memory has the union of their sources, the earliest `first_seen`, the
+  sum of their strengths, and kind `person` when any of them was; the old ones are retired "merged into mN".
 - **DRM-5** Decay, with no model, retires "faded" each memory neither recalled nor confirmed for
   `DREAM_FORGET_DAYS` (60) whose strength is below `DREAM_KEEP_STRENGTH` (3), retires "expired" each answer
   memory a day (`lasts` `day`) or 30 days (`month`) after its `last_seen`, and deletes the oldest dreamt episodes
   beyond the space **REM-2** allows.
-- **DRM-6** Traits, only when this dream dreamt an episode or changed a `person` memory, gives
-  `DREAM_TRAITS_SYSTEM` the gists of the episodes this dream dreamt, the `person` memories it changed and the living
-  traits, and reads `{add: [{about, when, do, sources, question, thought, expected}], support: [{id, sources}]}`:
-  each add is a candidate (**REM-14**) with its `confirm` question, its thought and expected answer (**REM-15**). As
-  many as it finds.
+- **DRM-6** Traits, only when this dream dreamt an episode that did not fail or changed a `person` memory, gives
+  `DREAM_TRAITS_SYSTEM` the person's own words (message, request or task; never Tinker's reply) of the episodes
+  this dream dreamt that did not fail, the `person` memories it changed and the living traits, and reads `{add:
+  [{about, when, do, sources, stated, question, thought, expected}], support: [{id, sources}], change: [{id, when,
+  do, sources}]}`: each add is a candidate (**REM-14**) with its `confirm` question, its thought and expected
+  answer (**REM-15**), but confirmed with no question when `stated` is true (the person said it in their own
+  words); each change is an `amend` delta of a living trait the person's own words now say otherwise about, with
+  no question. As many as it finds.
   The prompt says a trait is lasting (work, goals, likes, ways of working), never a passing state (the folder, the
   time, one command's output), and that each add's question, thought and expected are shown to the person, in plain
-  words that name no id.
-- **DRM-7** Each change a dream makes is added to log `dream events` as `{step, change, id, gist}` when it is
-  made.
+  words that name no id (as **REF-3**).
+- **DRM-7** Each change a dream makes (a retire too) is added to log `dream events` as `{step, change, id, gist}`
+  when it is made, named as the change it made (an add that confirms a like memory is a `confirm`).
 - **DRM-8** `tinker dream` (or `dream status`) says when the last dream was, how many changes each step made,
   how many episodes and questions wait, and whether a dream is queued or running. A dream's time is when it began,
   to the second; a change "since the last dream" is one at or after that time, so nothing changed while it ran is
@@ -2031,7 +2075,8 @@ the person (**INT**).
   (**INT-1**), and a queued learn runs as any job.
 - **DRM-12** Merge traits joins similar living traits (as **GRF-3**, on `when` and `do`) of a group where one has a
   history event since the last dream (teaching and the interview change traits too): `DREAM_MERGE_TRAITS_SYSTEM`
-  (given the traits newest first, and told so) answers `{merge: [{ids, when, do}]}`, the newer wording winning where they disagree, each applied as a `merge`
+  (given the traits newest first, and told so) answers `{merge: [{ids, when, do}]}`, keeping every detail of each
+  (a tool, a name, a number) unless a newer one contradicts it, the newer winning where they disagree, each applied as a `merge`
   delta (**REM-14**). With no such group it makes no call.
 - **DRM-13** Merge principles joins alike living principles (as **GRF-3**, on `when` and `do`, only within one
   scope) of a group where one has a history event since the last dream: `DREAM_MERGE_PRINCIPLES_SYSTEM` (given the
@@ -2074,11 +2119,13 @@ questions the dreams left. Nothing here is shown unasked.
   `settled` true answers the question, and the next pending one is opened after the `say` (**INT-1**); false keeps
   it current, so the talk goes on; a message that does not answer the question (off-topic) gives `settled` false,
   empty deltas and no `question`. A request about the talk itself (ask less, change the topic) is no trait: it gives
-  empty deltas and `settled` true. A reply that cannot be read, or a call that fails, says the answer could not be read and keeps the question. A message
+  empty deltas and `settled` true; a lasting wish for how Tinker answers (short answers) is a trait. The `say`
+  never names Tinker's workings (traits, candidates, episodes, deltas). A reply that cannot be read, or a call that fails, says the answer could not be read and keeps the question. A message
   and `/skip` are to the question last shown in that chat while it is pending, even when questions kept since (a
   dream run) now come before it.
 - **INT-4** `/skip` sends the question to the end of the queue (**REM-15**); its candidates stay candidates, and the
-  next is opened (**INT-1**). A `/command` other than `/skip` and `/leave` still runs.
+  next is opened (**INT-1**); a question skipped in this dialogue is not opened again in it, so with only skipped
+  ones pending a reflection round follows (**INT-2**). A `/command` other than `/skip` and `/leave` still runs.
 - **INT-5** Each turn is also kept as an episode of kind `interact` (**REM-1**), `{question, answer, say}`, already
   dreamt, so it is a source and never consolidated.
 

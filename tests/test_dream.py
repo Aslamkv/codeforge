@@ -9,7 +9,7 @@ import urllib.request
 import pytest
 from conftest import ask, confirmed_trait, quick_model_replying, replying
 
-from tinkerkit.build.project import TrackedWork
+from tinkerkit.build.project import TrackedWork, ending
 from tinkerkit.jobs import Jobs, Queue
 from tinkerkit.knowledge.principles import Principle, Principles
 from tinkerkit.memory import dream as dream_module
@@ -112,6 +112,25 @@ def test_a_routed_episode_is_not_a_question_answered_in_words():
     assert dream_module.answered_in_words([words, routed]) == [words]
 
 
+@pytest.mark.spec("DRM-3", "INS-4")
+def test_an_instruction_episode_is_not_a_question_answered_in_words():
+    words = {"message": "how tall is everest", "reply": "8.8 km", "status": "answered"}
+    proposed = {
+        "message": "/instruct create an empty file",
+        "reply": "🖥 I think you meant `touch x`",
+        "instruction": True,
+        "status": "answered",
+    }
+    assert dream_module.answered_in_words([words, proposed]) == [words]
+
+
+@pytest.mark.spec("DRM-3")
+def test_a_failed_episode_is_not_a_question_answered_in_words():
+    words = {"message": "how tall is everest", "reply": "8.8 km", "status": "answered"}
+    failed = {"message": "how tall is k2", "reply": "9 km", "status": "failed"}
+    assert dream_module.answered_in_words([words, failed]) == [words]
+
+
 @pytest.mark.spec("DRM-3")
 def test_consolidate_names_who_said_each_part_of_an_episode(home_store, monkeypatch):
     chat = Scratchpad.write(
@@ -202,6 +221,18 @@ def test_consolidate_leaves_an_answer_the_model_updates_or_retires(home_store, m
         (updated["id"], "Paris."),
         (retired["id"], "8,849 m."),
     ]
+
+
+@pytest.mark.spec("DRM-3")
+def test_consolidate_recalls_no_answer_memories(home_store, monkeypatch):
+    answer = memories().add("answer", "list the files?", "a.py and b.py.", ["e0"], EARLIER, "always")
+    person = memories().add("person", "files", "likes to list the files", ["e0"], EARLIER)
+    episode()
+    asked = replying(monkeypatch, {})
+    dream().consolidate(NOW)
+    shown = [memory["id"] for memory in json.loads(asked[0][1]["content"])["memories"]]
+    assert person["id"] in shown
+    assert answer["id"] not in shown
 
 
 @pytest.mark.spec("DRM-3")
@@ -303,6 +334,98 @@ def test_confirm_adds_strength_and_update_keeps_its_sources(home_store, monkeypa
     assert stored(kept["id"])["sources"] == ["e0", first["id"]]
     assert stored(changed["id"])["gist"] == "likes spaces"
     assert stored(changed["id"])["sources"] == ["e0", first["id"]]
+
+
+@pytest.mark.spec("DRM-3", "KNW-11")
+def test_an_add_like_a_living_memory_of_its_kind_confirms_that_one(home_store, monkeypatch):
+    first = episode()
+    kept = memories().add("person", "likes short replies", "Wants replies brief.", ["e0"], EARLIER)
+    other_kind = memories().add("fact", "uses zsh", "The shell is zsh.", ["e0"], EARLIER)
+    replying(
+        monkeypatch,
+        {
+            "add": [
+                {
+                    "kind": "person",
+                    "gist": "likes short replies",
+                    "text": "Wants replies brief.",
+                    "sources": [first["id"]],
+                },
+                {"kind": "person", "gist": "uses zsh", "text": "The shell is zsh.", "sources": [first["id"]]},
+            ]
+        },
+    )
+    dream().consolidate(NOW)
+    assert (stored(kept["id"])["strength"], stored(kept["id"])["last_seen"]) == (2, NOW.isoformat())
+    assert stored(kept["id"])["sources"] == ["e0", first["id"]]
+    assert stored(other_kind["id"])["strength"] == 1
+    assert [(memory["kind"], memory["gist"]) for memory in memories().living()] == [
+        ("person", "likes short replies"),
+        ("fact", "uses zsh"),
+        ("person", "uses zsh"),
+    ]
+    assert [(event["change"], event["gist"]) for event in dream_events()] == [
+        ("confirm", "likes short replies"),
+        ("add", "uses zsh"),
+    ]
+
+
+def failed_episode():
+    return Scratchpad.write(
+        {"chat": "telegram:1", "message": "list the files", "reply": "Oops.", "status": "failed"}, EARLIER
+    )
+
+
+def failed_run():
+    return Scratchpad.write({"chat": "telegram:1", "request": "rm x", "line": "rm x", "code": 1}, EARLIER)
+
+
+@pytest.mark.spec("DRM-3")
+def test_a_confirm_leaves_out_failed_episodes_and_runs_and_drops_with_none_left(home_store, monkeypatch):
+    sound, failed, broken = episode(), failed_episode(), failed_run()
+    mixed = memories().add("fact", "uses zsh", "The shell is zsh.", ["e0"], EARLIER)
+    unsound = memories().add("fact", "likes tabs", "Indents with tabs.", ["e0"], EARLIER)
+    replying(
+        monkeypatch,
+        {
+            "confirm": [
+                {"id": mixed["id"], "sources": [sound["id"], failed["id"], broken["id"]]},
+                {"id": unsound["id"], "sources": [failed["id"], broken["id"]]},
+            ]
+        },
+    )
+    dream().consolidate(NOW)
+    assert (stored(mixed["id"])["strength"], stored(mixed["id"])["sources"]) == (2, ["e0", sound["id"]])
+    assert stored(unsound["id"]) == unsound
+    assert [event["id"] for event in dream_events()] == [mixed["id"]]
+
+
+@pytest.mark.spec("DRM-3", "KNW-11")
+def test_an_add_confirming_a_like_memory_leaves_out_failed_sources_and_a_new_add_keeps_them(
+    home_store, monkeypatch
+):
+    failed, broken = failed_episode(), failed_run()
+    kept = memories().add("person", "likes short replies", "Wants replies brief.", ["e0"], EARLIER)
+    replying(
+        monkeypatch,
+        {
+            "add": [
+                {
+                    "kind": "person",
+                    "gist": "likes short replies",
+                    "text": "Wants replies brief.",
+                    "sources": [failed["id"], broken["id"]],
+                },
+                {"kind": "fact", "gist": "uses zsh", "text": "The shell is zsh.", "sources": [failed["id"]]},
+            ]
+        },
+    )
+    dream().consolidate(NOW)
+    assert stored(kept["id"]) == kept
+    assert [(memory["gist"], memory["sources"]) for memory in memories().living()] == [
+        ("likes short replies", ["e0"]),
+        ("uses zsh", [failed["id"]]),
+    ]
 
 
 @pytest.mark.spec("DRM-3")
@@ -432,6 +555,18 @@ def test_each_change_is_logged_as_a_dream_event(home_store, monkeypatch):
     assert dream_events() == [{"step": "consolidate", "change": "add", "id": "m1", "gist": "uses zsh"}]
 
 
+@pytest.mark.spec("DRM-7", "DRM-3")
+def test_a_consolidate_retire_of_a_fact_is_logged_as_a_dream_event(home_store, monkeypatch):
+    first = episode()
+    old = memories().add("fact", "uses vim", "Edits with vim.", ["e0"], EARLIER)
+    replying(monkeypatch, {"retire": [{"id": old["id"], "why": "moved to emacs", "sources": [first["id"]]}]})
+    dream().consolidate(NOW)
+    assert stored(old["id"])["retired"] == "moved to emacs"
+    assert dream_events() == [
+        {"step": "consolidate", "change": "retire", "id": old["id"], "gist": "uses vim"}
+    ]
+
+
 @pytest.mark.spec("DRM-6")
 def test_consolidate_keeps_the_episodes_it_dreamt_in_the_state(home_store, monkeypatch):
     first = episode()
@@ -488,8 +623,9 @@ def test_traits_reads_the_dream_and_adds_a_candidate_with_its_question_and_suppo
     dreamt_in(dream(), [first["id"]], [person["id"], fact["id"]]).traits(NOW)
     assert asked[0][0]["content"] == Prompts.DREAM_TRAITS_SYSTEM
     shown = asked[0][1]["content"]
-    assert all(text in shown for text in ("listed the rust crates", "writes rust", "keep replies short"))
-    assert "uses zsh" not in shown
+    assert json.loads(shown)["episodes"] == [{"id": first["id"], "words": "list the files"}]
+    assert all(text in shown for text in ("writes rust", "keep replies short"))
+    assert all(text not in shown for text in ("uses zsh", "listed the rust crates", "Done."))
     added = Home.store().get("traits", "t2")
     assert (added["status"], added["when"], added["sources"]) == ("candidate", "coding", [first["id"]])
     assert Home.store().get("traits", known["id"])["sources"] == ["e1", person["id"]]
@@ -507,6 +643,49 @@ def test_traits_reads_the_dream_and_adds_a_candidate_with_its_question_and_suppo
         {"step": "traits", "change": "question", "id": question["id"], "gist": "Do you code in Rust?"},
         {"step": "traits", "change": "support", "id": known["id"], "gist": "keep replies short"},
     ]
+
+
+@pytest.mark.spec("DRM-6", "DRM-7")
+def test_traits_amends_a_living_trait_the_persons_own_words_now_say_otherwise_about(home_store, monkeypatch):
+    first = episode()
+    known = living_trait()
+    status = known["status"]
+    replying(
+        monkeypatch,
+        {
+            "change": [
+                {"id": known["id"], "when": "chatting", "do": "give full answers", "sources": [first["id"]]}
+            ]
+        },
+    )
+    dreamt_in(dream(), [first["id"]]).traits(NOW)
+    amended = Home.store().get("traits", known["id"])
+    assert (amended["when"], amended["do"], amended["status"]) == ("chatting", "give full answers", status)
+    assert amended["history"][-1]["event"] == "amend"
+    assert Questions().all() == []
+    assert dream_events() == [
+        {"step": "traits", "change": "amend", "id": known["id"], "gist": "give full answers"}
+    ]
+
+
+@pytest.mark.spec("DRM-6")
+def test_traits_drops_a_change_without_own_words_a_do_or_a_living_trait(home_store, monkeypatch):
+    first = episode()
+    known, other = living_trait(), living_trait("use rust", "coding")
+    replying(
+        monkeypatch,
+        {
+            "change": [
+                {"id": known["id"], "do": "give full answers", "sources": [other["id"], "e99"]},
+                {"id": known["id"], "do": "give full answers"},
+                {"id": known["id"], "when": "chatting", "sources": [first["id"]]},
+                {"id": "t99", "do": "give full answers", "sources": [first["id"]]},
+            ]
+        },
+    )
+    dreamt_in(dream(), [first["id"]]).traits(NOW)
+    assert Home.store().get("traits", known["id"]) == known
+    assert dream_events() == []
 
 
 def merged_reply(first, second):
@@ -738,6 +917,41 @@ def test_traits_asks_nothing_without_a_dreamt_episode_or_a_changed_person(home_s
     fact = remembered("uses zsh", "The shell is zsh.")
     asked = replying(monkeypatch)
     dreamt_in(dream(), [], [fact["id"]]).traits(NOW)
+    assert asked == []
+
+
+@pytest.mark.spec("DRM-6")
+def test_traits_gives_each_kinds_own_words_and_leaves_failed_episodes_out(home_store, monkeypatch):
+    request = Scratchpad.write(
+        {"chat": "telegram:1", "request": "list files", "line": "ls", "code": 0}, EARLIER
+    )
+    task = Scratchpad.write({"chat": "telegram:1", "task": "make a game", "status": "done"}, EARLIER)
+    failed = Scratchpad.write(
+        {"chat": "telegram:1", "message": "hi", "reply": "Oops.", "status": "failed"}, EARLIER
+    )
+    broken = Scratchpad.write({"chat": "telegram:1", "request": "rm x", "line": "rm x", "code": 1}, EARLIER)
+    blocked = Scratchpad.write({"chat": "telegram:1", "task": "make a site", "status": "blocked"}, EARLIER)
+    asked = replying(
+        monkeypatch, {"add": [added_trait("answer with rust examples", [failed["id"]])], "support": []}
+    )
+    dreamt_in(dream(), [request["id"], task["id"], failed["id"], broken["id"], blocked["id"]]).traits(NOW)
+    assert json.loads(asked[0][1]["content"])["episodes"] == [
+        {"id": request["id"], "words": "list files"},
+        {"id": task["id"], "words": "make a game"},
+    ]
+    assert Traits().all() == []
+
+
+@pytest.mark.spec("DRM-6")
+def test_traits_asks_nothing_when_every_dreamt_episode_failed_and_no_person_memory_changed(
+    home_store, monkeypatch
+):
+    failed = Scratchpad.write(
+        {"chat": "telegram:1", "message": "hi", "reply": "Oops.", "status": "failed"}, EARLIER
+    )
+    broken = Scratchpad.write({"chat": "telegram:1", "request": "rm x", "line": "rm x", "code": 1}, EARLIER)
+    asked = replying(monkeypatch, {"add": [], "support": []})
+    dreamt_in(dream(), [failed["id"], broken["id"]]).traits(NOW)
     assert asked == []
 
 
@@ -1119,12 +1333,16 @@ def test_run_without_a_quick_model_does_nothing(home_store, monkeypatch):
     assert len(Scratchpad.fresh()) == 1
 
 
-@pytest.mark.spec("DRM-2", "PRJ-15")
-def test_run_gives_its_end(home_store, monkeypatch):
+@pytest.mark.spec("DRM-1", "DRM-2", "DRM-8", "PRJ-15")
+def test_run_ends_saying_each_steps_count(home_store, monkeypatch):
     monkeypatch.setattr(Models, "quick", staticmethod(lambda: "quick"))
-    Home.store().put("dream", "state", {"done": list(Dream.STEPS), "changed": [], "counts": {}, "last": ""})
+    counts = {"consolidate": 2, "revise": 1, "decay": 0}
+    Home.store().put(
+        "dream", "state", {"done": list(Dream.STEPS), "changed": [], "counts": counts, "last": ""}
+    )
     ended = dream().run(NOW)
-    assert (ended["status"], ended["headline"]) == ("done", "Dreamt")
+    assert ended["status"] == "done"
+    assert ended["headline"].startswith("Dreamt: consolidate 2 · revise 1 · decay 0 · ")
 
 
 @pytest.mark.spec("DRM-2", "PRJ-15")
@@ -1182,6 +1400,23 @@ def test_revise_merges_a_changed_group_into_one_memory(home_store, monkeypatch):
     assert revising.changed == [second["id"], "m4", first["id"], second["id"]]
     assert [event["change"] for event in dream_events()] == ["merge", "retire", "retire"]
     assert {event["step"] for event in dream_events()} == {"revise"}
+
+
+@pytest.mark.spec("DRM-4")
+def test_revise_keeps_kind_person_when_any_merged_memory_was(home_store, monkeypatch):
+    liked = remembered("likes short replies", "Wants it brief.", "person", ("e1",), LONG_AGO)
+    known = remembered("likes short replies", "Replies are brief.", "fact", ("e2",), EARLIER)
+    replying(
+        monkeypatch,
+        {
+            "merge": [{"ids": [liked["id"], known["id"]], "kind": "fact", "gist": "brief", "text": "Brief."}],
+            "retire": [],
+        },
+    )
+    revising = dream()
+    revising.changed = [known["id"]]
+    revising.revise(NOW)
+    assert stored("m3")["kind"] == "person"
 
 
 @pytest.mark.spec("DRM-4")
@@ -1502,6 +1737,14 @@ class Heard:
         pass
 
 
+class Told(Heard):
+    def __init__(self, seen):
+        self.seen = seen
+
+    def title(self, text, icon):
+        self.seen.append(("said", text, icon))
+
+
 class PhaseTracker:
     def phase(self, step):
         return f"phase {step}"
@@ -1557,7 +1800,7 @@ def test_mind_handles_the_memory_views_and_gives_forget_the_persons_yes(home_sto
     ]
 
 
-@pytest.mark.spec("TNK-1", "DRM-8", "DRM-9", "REF-7")
+@pytest.mark.spec("TNK-1", "DRM-1", "DRM-8", "DRM-9", "REF-7")
 def test_mind_shows_the_dream_and_dream_run_is_a_job_with_the_tracker_phases(home_store, monkeypatch):
     seen = tracked_work(monkeypatch)
     monkeypatch.setattr(dream_module, "show_dream", lambda: seen.append("show_dream"))
@@ -1566,11 +1809,12 @@ def test_mind_shows_the_dream_and_dream_run_is_a_job_with_the_tracker_phases(hom
     monkeypatch.setattr(dream_module, "show_memory_graph", lambda: seen.append("show_memory_graph"))
     monkeypatch.setattr(Retriever, "__init__", lambda retriever, embeddings: None)
     monkeypatch.setattr("tinkerkit.ranking.Embeddings.configured", staticmethod(lambda: None))
+    dreamt = ending("done", "Dreamt: consolidate 1 · revise 0")
     monkeypatch.setattr(
-        Dream, "run", lambda dream: seen.append(("run", dream.phase("consolidate"))) or "dreamt"
+        Dream, "run", lambda dream: seen.append(("run", dream.phase("consolidate"))) or dreamt
     )
     for words in ([], ["status"], ["self"], ["graph"], ["run"]):
-        Mind().handle(["dream", *words], Heard())
+        Mind().handle(["dream", *words], Told(seen))
     assert seen == [
         "show_dream",
         "show_dream",
@@ -1578,8 +1822,20 @@ def test_mind_shows_the_dream_and_dream_run_is_a_job_with_the_tracker_phases(hom
         "show_memory_graph",
         ("follow", "Dreaming"),
         ("run", "phase consolidate"),
-        ("ended", "dreamt"),
+        ("said", "Dreamt: consolidate 1 · revise 0", "✅"),
+        ("ended", dreamt),
     ]
+
+
+@pytest.mark.spec("DRM-1", "PRJ-19")
+def test_dream_run_leaves_a_blocked_ending_for_the_tracked_work_to_say(home_store, monkeypatch):
+    seen = tracked_work(monkeypatch)
+    monkeypatch.setattr(Retriever, "__init__", lambda retriever, embeddings: None)
+    monkeypatch.setattr("tinkerkit.ranking.Embeddings.configured", staticmethod(lambda: None))
+    blocked = ending("blocked", "No model is in use yet")
+    monkeypatch.setattr(Dream, "run", lambda dream: blocked)
+    Mind().handle(["dream", "run"], Told(seen))
+    assert seen == [("follow", "Dreaming"), ("ended", blocked)]
 
 
 @pytest.mark.spec("DRM-9")

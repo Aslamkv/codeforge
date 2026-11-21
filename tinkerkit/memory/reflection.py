@@ -21,7 +21,7 @@ REFLECTED_WHY = "reflected: "
 NOT_TURNED_DOWN_WHYS = ("forgotten", "replaced by ", REFLECTED_WHY)
 SHOWN_MEMORY_KEYS = ("id", "kind", "gist", "text", "strength", "recalled")
 SIDE_TRAIT_KEYS = ("id", "when", "do")
-PENDING_KEYS = ("text", "thought", "expected")
+PENDING_KEYS = ("id", "text", "thought", "expected")
 
 
 class Reflection:
@@ -58,6 +58,7 @@ class Reflection:
             "kept": kept,
             "notes": notes_kept(reply.get("notes"), now),
             "retired": routes_retired(listed(reply.get("retire")), shown_gaps, now),
+            "dropped": questions_dropped(listed(reply.get("drop")), now),
             "learn": self.learn_queued(said(reply, "learn").strip()),
             "done": reply.get("done") is True,
         }
@@ -91,6 +92,11 @@ def routes_retired(retires, shown_gaps, now):
     return [item for item in wanted if item["id"] in retired]
 
 
+def questions_dropped(drops, now):
+    named = [item for item in drops if isinstance(item.get("id"), str)]
+    return [item["id"] for item in named if Questions().drop(item["id"], said(item, "why"), now)]
+
+
 def holding(parts):
     return {name: part for name, part in parts.items() if holds_something(part)}
 
@@ -103,12 +109,18 @@ def holds_something(value):
 
 def evidence():
     episodes = [episode for episode in Home.store().items(Scratchpad.EPISODES).values() if episode["dreamt"]]
-    newest = sorted(episodes, key=lambda episode: episode["dreamt_time"], reverse=True)[:REFLECT_EPISODES]
+    newest = sorted(episodes, key=lambda episode: episode["dreamt_time"], reverse=True)
     people = [memory for memory in Memories(None).living() if memory["kind"] == "person"]
-    return {
-        "episodes": [{"id": episode["id"], "gist": episode.get("gist", "")} for episode in newest],
-        "memories": shown(people),
-    }
+    return {"episodes": own_words(newest)[:REFLECT_EPISODES], "memories": shown(people)}
+
+
+def own_words(episodes):
+    kinds = ((episode, kind_of(episode)) for episode in episodes)
+    return [
+        {"id": episode["id"], "words": episode[kind.text]}
+        for episode, kind in kinds
+        if kind and not kind.failed(episode)
+    ]
 
 
 class ChatEpisode:
@@ -278,6 +290,7 @@ def add_delta(item, sources):
         "when": said(item, "when"),
         "do": item["do"],
         "sources": sources,
+        **({"confirmed": True} if item.get("stated") is True else {}),
     }
 
 
@@ -290,7 +303,8 @@ def trait_added(item, given, now, logged):
     for trait in Traits().apply([delta], now):
         if newly_added(trait):
             logged("add", trait)
-            confirms.append(confirm_asked(item, trait, sources, now, logged))
+            if trait["status"] == "candidate":
+                confirms.append(confirm_asked(item, trait, sources, now, logged))
         else:
             logged("support", trait)
     return next((question for question in confirms if question), None)

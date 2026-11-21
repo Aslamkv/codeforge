@@ -12,22 +12,29 @@ from tinkerkit.memory.reflection import (
     own_traits,
     question_kept,
     said,
-    shown_question,
     traits_shown,
 )
 from tinkerkit.prompts import Prompts
 from tinkerkit.settings import INTERACT_TURNS, Home
 
 UNREADABLE = "Couldn't read that answer; here it is again."
+TALK_KEYS = ("text", "thought", "expected")
 
 
 class Interview:
     def __init__(self, questions=None):
         self.questions = questions or Questions()
         self.shown_to = {}
+        self.skipped_in = {}
+
+    def opened(self, chat):
+        self.skipped_in[chat] = set()
+        return self.turn(chat)
 
     def turn(self, chat, now=None, say=""):
-        question = self.questions.next() or first_kept(Reflection().round(now))
+        question = self.unskipped(chat, self.questions.pending()) or self.unskipped(
+            chat, kept_of(Reflection().round(now))
+        )
         if question is None:
             return Turn(after(say, ALL_FOR_NOW), True)
         self.shown_to[chat] = question["id"]
@@ -47,7 +54,12 @@ class Interview:
         question = self.current(chat)
         if question:
             self.questions.skip(question["id"])
+            self.skipped_in.setdefault(chat, set()).add(question["id"])
         return self.turn(chat)
+
+    def unskipped(self, chat, questions):
+        skipped = self.skipped_in.get(chat, set())
+        return next((question for question in questions if question["id"] not in skipped), None)
 
     def answered(self, chat, text, now=None):
         question = self.current(chat)
@@ -77,8 +89,8 @@ class Interview:
         )
 
 
-def first_kept(round_kept):
-    return round_kept["kept"][0] if round_kept and round_kept["kept"] else None
+def kept_of(round_kept):
+    return round_kept["kept"] if round_kept else []
 
 
 def after(say, text):
@@ -90,7 +102,7 @@ def talk_text(chat, question, waiting, message):
     return json.dumps(
         {
             "traits": {about: traits_shown(own_traits(traits, about), "confirmed") for about in TRAIT_ABOUTS},
-            "question": {**shown_question(question), "traits": asked_traits(question)},
+            "question": {key: question[key] for key in TALK_KEYS} | {"traits": asked_traits(question)},
             "next": waiting["text"] if waiting else None,
             "dialogue": dialogue(chat),
             "message": message,

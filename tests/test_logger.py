@@ -501,7 +501,8 @@ def test_handling_a_message_tells_the_channel_and_what_was_asked():
     logger.install()
     desk = Desk.__new__(Desk)
     desk.inside, desk.questions = {}, Questions()
-    desk.feedback = SimpleNamespace(heard=lambda chat, text, now: None)
+    desk.feedback = SimpleNamespace(heard=lambda chat, text, now: None, proposes=lambda chat: False)
+    desk.episodes = SimpleNamespace(heard=lambda chat, text, now: None)
     desk.handle(channel, SimpleNamespace(text=CHAT_APP_START, chat=1))
     started_and_ended(
         f"Handling a SimpleNamespace message: {CHAT_APP_START!r}", "SimpleNamespace message handled"
